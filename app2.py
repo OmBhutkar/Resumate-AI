@@ -265,10 +265,40 @@ def extract_text_from_pdf(file_path):
         return ""
 
 def show_pdf(file_path):
-    with open(file_path, "rb") as f:
-        base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf" style="border-radius: 10px; border: 2px solid #3d3d46;"></iframe>'
-    st.markdown(pdf_display, unsafe_allow_html=True)
+    try:
+        with open(file_path, "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+        
+        # Try multiple display methods for better compatibility
+        try:
+            # Method 1: Direct iframe (works in local)
+            pdf_display = f'''
+            <div style="background: #262730; padding: 1rem; border-radius: 10px; border: 2px solid #3d3d46;">
+                <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf" style="border-radius: 5px;"></iframe>
+            </div>
+            '''
+            st.markdown(pdf_display, unsafe_allow_html=True)
+        except:
+            # Method 2: Alternative display with download option
+            st.markdown("""
+            <div style="background: #262730; padding: 2rem; border-radius: 10px; border: 2px solid #3d3d46; text-align: center;">
+                <h4 style="color: #FF4B4B; margin-bottom: 1rem;">📄 Resume Preview</h4>
+                <p style="color: #a0a0a0; margin-bottom: 1rem;">PDF preview is not available in this environment.</p>
+                <p style="color: #a0a0a0;">Your resume has been successfully uploaded and analyzed!</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Provide download link
+            with open(file_path, "rb") as f:
+                st.download_button(
+                    label="📥 Download Your Resume",
+                    data=f.read(),
+                    file_name=os.path.basename(file_path),
+                    mime="application/pdf"
+                )
+    except Exception as e:
+        st.error(f"Error displaying PDF: {e}")
+        st.info("Your resume has been uploaded successfully and is being analyzed.")
 
 def predict_career_field_naive_bayes(resume_text):
     try:
@@ -616,6 +646,20 @@ def main():
                 # PDF Display
                 st.markdown("---")
                 st.subheader("📄 Your Uploaded Resume")
+                
+                # Try Streamlit's built-in file display first
+                try:
+                    with open(file_path, "rb") as f:
+                        st.download_button(
+                            label="📥 Download Resume",
+                            data=f.read(),
+                            file_name=uploaded_file.name,
+                            mime="application/pdf"
+                        )
+                except:
+                    pass
+                
+                # Then try custom PDF display
                 show_pdf(str(file_path))
                 
                 st.markdown("---")
