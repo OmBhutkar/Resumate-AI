@@ -28,10 +28,10 @@ from sklearn.naive_bayes import MultinomialNB
 import nltk
 
 # PDF Processing
-from pdfminer3.layout import LAParams
-from pdfminer3.pdfpage import PDFPage
-from pdfminer3.pdfinterp import PDFResourceManager, PDFPageInterpreter
-from pdfminer3.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import TextConverter
 
 # Additional imports
 from streamlit_tags import st_tags
