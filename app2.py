@@ -583,7 +583,10 @@ def main():
                     ip_add = socket.gethostbyname(host_name)
                 except:
                     ip_add = "127.0.0.1"
-                dev_user = os.getlogin()
+                try:
+                    dev_user = os.getlogin()
+                except OSError:
+                    dev_user = "unknown_user"
                 os_name_ver = platform.system() + " " + platform.release()
                 
                 # Location detection
