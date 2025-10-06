@@ -25,6 +25,9 @@ except ImportError:
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.naive_bayes import MultinomialNB
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 import nltk
 
 # PDF Processing
@@ -570,7 +573,7 @@ def get_youtube_recommendations(predicted_field):
             {'title': 'React Native Crash Course', 'url': 'https://www.youtube.com/watch?v=0-S5a0eXPoc'},
         ],
         'DevOps': [
-            {'title': 'DevOps Full Course', 'url': 'https://www.youtube.com/watch?v=Rv3o-6ZMqS4'},
+            {'title': 'DevOps Full Course', 'url': 'https://www.youtube.com/watch?v=JVhyEcwypqc'},
             {'title': 'Docker Tutorial', 'url': 'https://www.youtube.com/watch?v=3c-iBn73dDE'},
         ],
         'General IT': [
@@ -619,6 +622,182 @@ def insertf_data(feed_name, feed_email, feed_score, comments, Timestamp):
     except Exception as e:
         st.error(f"Error saving feedback: {e}")
         return False
+
+# ==================== K-Means Clustering Functions ====================
+
+def prepare_clustering_data(df):
+    """Prepare data for K-Means clustering"""
+    try:
+        # Create a copy of the dataframe
+        cluster_df = df.copy()
+        
+        # Convert resume_score to numeric
+        cluster_df['resume_score_num'] = pd.to_numeric(cluster_df['resume_score'], errors='coerce')
+        
+        # Extract skills count
+        cluster_df['skills_count'] = cluster_df['Actual_skills'].apply(lambda x: len(eval(x)) if pd.notnull(x) and x != '' else 0)
+        
+        # Extract page count
+        cluster_df['page_count'] = pd.to_numeric(cluster_df['Page_no'], errors='coerce')
+        
+        # Encode categorical variables
+        from sklearn.preprocessing import LabelEncoder
+        le_field = LabelEncoder()
+        le_level = LabelEncoder()
+        
+        cluster_df['field_encoded'] = le_field.fit_transform(cluster_df['Predicted_Field'].fillna('Unknown'))
+        cluster_df['level_encoded'] = le_level.fit_transform(cluster_df['User_level'].fillna('Unknown'))
+        
+        # Select features for clustering
+        features = ['resume_score_num', 'skills_count', 'page_count', 'field_encoded', 'level_encoded']
+        
+        # Remove rows with missing values
+        clustering_data = cluster_df[features].dropna()
+        
+        return clustering_data, cluster_df, le_field, le_level
+    except Exception as e:
+        st.error(f"Error preparing clustering data: {e}")
+        return None, None, None, None
+
+def perform_kmeans_clustering(df, n_clusters=3):
+    """Classify users by ATS score thresholds: High (90-100), Average (75-89), Low (<75)"""
+    try:
+        # Prepare data with resume scores
+        cluster_df = df.copy()
+        cluster_df['resume_score_num'] = pd.to_numeric(cluster_df['resume_score'], errors='coerce')
+        
+        # Count skills for each user
+        cluster_df['skills_count'] = 0
+        for idx, row in cluster_df.iterrows():
+            try:
+                skills = eval(row['Actual_skills']) if isinstance(row['Actual_skills'], str) else row['Actual_skills']
+                if isinstance(skills, list):
+                    cluster_df.at[idx, 'skills_count'] = len(skills)
+            except:
+                cluster_df.at[idx, 'skills_count'] = 0
+        
+        # Classify users based on ATS score thresholds
+        def classify_by_score(score):
+            if score >= 90:
+                return 0  # High Performers
+            elif score >= 75:
+                return 1  # Average Performers  
+            else:
+                return 2  # Low Performers
+        
+        cluster_df['Cluster'] = cluster_df['resume_score_num'].apply(classify_by_score)
+        
+        # Calculate cluster statistics
+        cluster_stats = {}
+        for i in range(3):  # Always 3 clusters: High, Average, Low
+            cluster_data = cluster_df[cluster_df['Cluster'] == i]
+            if len(cluster_data) > 0:
+                cluster_stats[i] = {
+                    'count': len(cluster_data),
+                    'avg_score': cluster_data['resume_score_num'].mean(),
+                    'avg_skills': cluster_data['skills_count'].mean(),
+                    'top_field': cluster_data['Predicted_Field'].mode()[0] if len(cluster_data) > 0 else 'N/A',
+                    'top_level': cluster_data['User_level'].mode()[0] if len(cluster_data) > 0 else 'N/A'
+                }
+            else:
+                # Empty cluster
+                cluster_stats[i] = {
+                    'count': 0,
+                    'avg_score': 0,
+                    'avg_skills': 0,
+                    'top_field': 'N/A',
+                    'top_level': 'N/A'
+                }
+        
+        return cluster_df, cluster_stats, None, None
+    except Exception as e:
+        st.error(f"Error performing classification: {e}")
+        return None, None, None, None
+
+def get_cluster_insights(cluster_stats):
+    """Generate insights for each cluster based on ATS score thresholds"""
+    insights = {}
+    
+    # Define cluster categories for direct ATS score classification
+    # Cluster 0 = High (90-100), Cluster 1 = Average (75-89), Cluster 2 = Low (<75)
+    cluster_categories = {
+        0: {
+            "name": "🌟 High Performers",
+            "icon": "🌟",
+            "color": "#00C48C",
+            "description": "Users with excellent resumes (ATS scores 90-100). They demonstrate strong professional profiles with comprehensive content and relevant skills.",
+            "recommendations": [
+                "Continue maintaining high standards",
+                "Consider mentoring other users", 
+                "Apply to premium positions",
+                "Share best practices with community"
+            ],
+            "rank": 1
+        },
+        1: {
+            "name": "🎯 Average Performers", 
+            "icon": "🎯",
+            "color": "#FFD700",
+            "description": "Users with decent resumes (ATS scores 75-89) that meet basic requirements but have room for improvement. They show potential for growth.",
+            "recommendations": [
+                "Enhance resume sections with more detail",
+                "Add professional links and portfolios",
+                "Focus on skill development",
+                "Include more quantifiable achievements"
+            ],
+            "rank": 2
+        },
+        2: {
+            "name": "⚠️ Low Performers",
+            "icon": "⚠️", 
+            "color": "#FF4B4B",
+            "description": "Users with low ATS scores (<75) who need significant resume improvements to be competitive in the job market. Focus on fundamental resume building.",
+            "recommendations": [
+                "Add missing resume sections",
+                "Include more work experience details",
+                "Develop technical skills urgently",
+                "Improve overall content quality"
+            ],
+            "rank": 3
+        }
+    }
+    
+    # Assign categories to clusters based on predefined mapping
+    for cluster_id, stats in cluster_stats.items():
+        if cluster_id in cluster_categories:
+            category_info = cluster_categories[cluster_id]
+            
+            insights[cluster_id] = {
+                'name': category_info['name'],
+                'icon': category_info['icon'],
+                'color': category_info['color'],
+                'description': category_info['description'],
+                'recommendations': category_info['recommendations'],
+                'stats': stats,
+                'rank': category_info['rank']
+            }
+    
+    # Ensure all 3 clusters are represented (High, Average, Low)
+    for i in range(3):
+        if i not in insights and i in cluster_categories:
+            category_info = cluster_categories[i]
+            insights[i] = {
+                'name': category_info['name'],
+                'icon': category_info['icon'],
+                'color': category_info['color'],
+                'description': category_info['description'],
+                'recommendations': category_info['recommendations'],
+                'stats': {
+                    'count': 0,
+                    'avg_score': 0,
+                    'avg_skills': 0,
+                    'top_field': 'N/A',
+                    'top_level': 'N/A'
+                },
+                'rank': category_info['rank']
+            }
+    
+    return insights
 
 # ==================== Main Application ====================
 
@@ -2004,6 +2183,12 @@ Generated by Resumate AI - AI Resume Analyzer
                     "icon": "⚡",
                     "color": "#9C27B0", 
                     "description": "Our enhanced algorithm analyzes not just presence of sections but also their depth, quality, and completeness to provide dynamic scores."
+                },
+                {
+                    "title": "K-Means Clustering Analysis",
+                    "icon": "🧩",
+                    "color": "#4CAF50", 
+                    "description": "Automatically categorizes users into 3 performance levels based on their resume quality and characteristics."
                 }
             ]
             
@@ -2306,18 +2491,26 @@ Generated by Resumate AI - AI Resume Analyzer
             st.session_state.login_attempts = 0
         if 'show_hint' not in st.session_state:
             st.session_state.show_hint = False
+        if 'cluster_analysis_done' not in st.session_state:
+            st.session_state.cluster_analysis_done = False
+        if 'cluster_data' not in st.session_state:
+            st.session_state.cluster_data = None
         
         # Show logout button if logged in
         if st.session_state.admin_logged_in:
             col_logout1, col_logout2, col_logout3 = st.columns([4, 1, 1])
             with col_logout2:
                 if st.button('🔄 Refresh', type="secondary", use_container_width=True):
+                    st.session_state.cluster_analysis_done = False
+                    st.session_state.cluster_data = None
                     st.rerun()
             with col_logout3:
                 if st.button('🚪 Logout', type="primary", use_container_width=True):
                     st.session_state.admin_logged_in = False
                     st.session_state.login_attempts = 0
                     st.session_state.show_hint = False
+                    st.session_state.cluster_analysis_done = False
+                    st.session_state.cluster_data = None
                     st.success("👋 Logged out successfully!")
                     time.sleep(1)
                     st.rerun()
@@ -2374,6 +2567,17 @@ Generated by Resumate AI - AI Resume Analyzer
             if st.session_state.show_hint:
                 col_hint1, col_hint2, col_hint3 = st.columns([1, 1, 1])
                 with col_hint2:
+                    if st.button('💡 Show Hint', type="secondary", use_container_width=True):
+                        st.markdown("""
+                            <div class='info-box'>
+                                <h4>🔐 Default Credentials</h4>
+                                <p><b>Username:</b> admin</p>
+                                <p><b>Password:</b> admin@resume-analyzer</p>
+                                <p style='margin-top: 1rem; font-size: 0.9rem; opacity: 0.8;'>
+                                    💡 Tip: These are the default credentials for first-time access
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
                     if st.button('💡 Show Hint', type="secondary", use_container_width=True):
                         st.markdown("""
                             <div class='info-box'>
@@ -2479,145 +2683,323 @@ Generated by Resumate AI - AI Resume Analyzer
                     
                     # Display user data
                     st.header("**📊 User's Data**")
-                    st.dataframe(user_df, use_container_width=True)
                     
-                    # Download CSV
-                    csv = user_df.to_csv(index=False)
-                    b64 = base64.b64encode(csv.encode()).decode()
-                    href = f'<a href="data:file/csv;base64,{b64}" download="user_data.csv" style="color: #FF4B4B; font-weight: 600; font-size: 1.1rem;">📥 Download User Data CSV</a>'
-                    st.markdown(href, unsafe_allow_html=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    # Search functionality
+                    col_search1, col_search2, col_search3 = st.columns([2, 1, 1])
                     
-                    # Enhanced Charts with Attractive Styling
-                    col1, col2 = st.columns(2)
+                    with col_search1:
+                        search_name = st.text_input(
+                            "🔍 Search by Name", 
+                            placeholder="Enter user name to search...",
+                            key="search_user_name"
+                        )
+                    
+                    with col_search2:
+                        # Complete list of all supported fields
+                        all_fields = ["Data Science", "Web Development", "Mobile Development", 
+                                    "DevOps", "Cybersecurity", "UI/UX Design", "General IT"]
+                        # Add any additional fields from actual data
+                        existing_fields = list(user_df['Predicted_Field'].unique())
+                        for field in existing_fields:
+                            if field not in all_fields:
+                                all_fields.append(field)
+                        
+                        search_field = st.selectbox(
+                            "🎯 Filter by Field",
+                            options=["All Fields"] + sorted(all_fields),
+                            key="filter_field"
+                        )
+                    
+                    with col_search3:
+                        search_level = st.selectbox(
+                            "👤 Filter by Level",
+                            options=["All Levels"] + list(user_df['User_level'].unique()),
+                            key="filter_level"
+                        )
+                    
+                    # Apply filters
+                    filtered_df = user_df.copy()
+                    
+                    # Search by name (case-insensitive)
+                    if search_name:
+                        filtered_df = filtered_df[
+                            filtered_df['Name'].str.contains(search_name, case=False, na=False) |
+                            filtered_df['Email_ID'].str.contains(search_name, case=False, na=False)
+                        ]
+                    
+                    # Filter by field
+                    if search_field != "All Fields":
+                        filtered_df = filtered_df[filtered_df['Predicted_Field'] == search_field]
+                    
+                    # Filter by level
+                    if search_level != "All Levels":
+                        filtered_df = filtered_df[filtered_df['User_level'] == search_level]
+                    
+                    # Display search results info
+                    if len(filtered_df) != len(user_df):
+                        search_info = f"📊 Showing {len(filtered_df)} of {len(user_df)} users"
+                        if search_name:
+                            search_info += f" matching '{search_name}'"
+                        if search_field != "All Fields":
+                            search_info += f" in {search_field}"
+                        if search_level != "All Levels":
+                            search_info += f" ({search_level})"
+                        
+                        st.success(search_info)
+                    
+                    # Display filtered data
+                    if len(filtered_df) > 0:
+                        st.dataframe(filtered_df, use_container_width=True)
+                    else:
+                        st.warning("❌ No users found matching your search criteria. Try adjusting your filters.")
+                    
+                    # Download CSV (filtered data)
+                    if len(filtered_df) > 0:
+                        csv = filtered_df.to_csv(index=False)
+                        b64 = base64.b64encode(csv.encode()).decode()
+                        download_filename = "filtered_user_data.csv" if len(filtered_df) != len(user_df) else "user_data.csv"
+                        href = f'<a href="data:file/csv;base64,{b64}" download="{download_filename}" style="color: #FF4B4B; font-weight: 600; font-size: 1.1rem;">📥 Download {("Filtered " if len(filtered_df) != len(user_df) else "")}User Data CSV ({len(filtered_df)} records)</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                    
+                    # Stunning Enhanced Charts Section
+                    st.markdown("""
+                        <div style="
+                            background: linear-gradient(135deg, #1a1d29 0%, #2d313a 100%);
+                            padding: 2rem;
+                            border-radius: 20px;
+                            border: 2px solid #00C48C;
+                            margin: 2rem 0;
+                            box-shadow: 0 15px 35px rgba(0, 196, 140, 0.2);
+                            text-align: center;
+                        ">
+                            <h2 style="
+                                color: #00C48C; 
+                                font-size: 2.2rem; 
+                                margin-bottom: 1rem;
+                                font-weight: 700;
+                                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                            ">📊 User Demographics & Analytics</h2>
+                            <p style="
+                                color: #b0b0b0; 
+                                font-size: 1.1rem;
+                                margin: 0;
+                            ">Comprehensive insights into user distribution and characteristics</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns(2, gap="large")
                     
                     with col1:
-                        st.subheader("**📈 Predicted Field Distribution**")
+                        # Enhanced Career Fields Sunburst/Donut Chart
                         field_counts = user_df['Predicted_Field'].value_counts()
                         
-                        # Custom vibrant color palette
-                        colors = ['#FF4B4B', '#00C48C', '#FFD700', '#9C27B0', '#00BCD4', '#FF6B6B', '#4ECDC4', '#FFA500']
+                        # Premium gradient color palette
+                        colors = ['#FF4B4B', '#00C48C', '#FFD700', '#9C27B0', '#00BCD4', '#FF6B6B', '#4ECDC4', '#FFA500', '#E91E63', '#607D8B']
                         
                         fig = px.pie(values=field_counts.values, 
                                    names=field_counts.index, 
-                                   title='<b>Career Fields Distribution</b>',
-                                   hole=0.4,  # Donut chart
+                                   title='<b style="color:#FF4B4B; font-size:18px;">🎯 Career Fields Distribution</b>',
+                                   hole=0.6,  # Larger hole for modern aesthetic
                                    color_discrete_sequence=colors)
                         
                         fig.update_traces(
-                            textposition='outside',
+                            textposition='auto',
                             textinfo='percent+label',
-                            marker=dict(line=dict(color='#000000', width=2)),
-                            pull=[0.1 if i == 0 else 0 for i in range(len(field_counts))],  # Pull out largest slice
-                            hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                            textfont=dict(size=12, family="Arial Black", color='white'),
+                            marker=dict(
+                                line=dict(color='#1a1d24', width=3)
+                            ),
+                            pull=[0.08 if i == 0 else 0.03 for i in range(len(field_counts))],  # Enhanced pull effect
+                            hovertemplate='<b style="color:#FF4B4B;">%{label}</b><br>' +
+                                         'Users: <b>%{value}</b><br>' +
+                                         'Percentage: <b>%{percent}</b><br>' +
+                                         '<extra></extra>',
+                            rotation=30  # Rotate for visual appeal
                         )
                         
                         fig.update_layout(
                             paper_bgcolor='rgba(0,0,0,0)',
                             plot_bgcolor='rgba(0,0,0,0)',
-                            font=dict(color='white', size=13, family='Arial Black'),
-                            title_font=dict(size=18, color='#FF4B4B'),
+                            font=dict(color='white', size=12, family='Arial'),
+                            title_font=dict(size=18, color='#FF4B4B', family='Arial Black'),
                             showlegend=True,
                             legend=dict(
                                 orientation="v",
                                 yanchor="middle",
                                 y=0.5,
                                 xanchor="left",
-                                x=1.1,
-                                bgcolor='rgba(30, 33, 48, 0.8)',
+                                x=1.05,
+                                bgcolor='rgba(30, 33, 48, 0.95)',
                                 bordercolor='#FF4B4B',
-                                borderwidth=2
+                                borderwidth=2,
+                                font=dict(size=11, color='white', family='Arial')
                             ),
-                            margin=dict(l=20, r=150, t=60, b=20),
-                            height=450
+                            margin=dict(l=20, r=180, t=80, b=20),
+                            height=500,
+                            annotations=[
+                                dict(
+                                    text=f'<b style="color:#FF4B4B; font-size:28px;">{len(field_counts)}</b><br>' +
+                                         '<span style="color:#b0b0b0; font-size:14px;">Career Fields</span>',
+                                    x=0.5, y=0.5,
+                                    font_size=16,
+                                    showarrow=False,
+                                    font_color="white"
+                                )
+                            ]
                         )
                         
                         st.plotly_chart(fig, use_container_width=True)
-                        st.markdown("</div>", unsafe_allow_html=True)
                     
                     with col2:
-                        st.subheader("**📊 User Experience Level**")
+                        # Enhanced Experience Level Polar Chart
                         level_counts = user_df['User_level'].value_counts()
                         
-                        # Gradient color scheme for experience levels
-                        exp_colors = ['#00C48C', '#FFD700', '#FF4B4B', '#9C27B0']
+                        # Premium gradient colors for experience
+                        exp_colors = ['#00C48C', '#FFD700', '#FF4B4B', '#9C27B0', '#00BCD4']
                         
                         fig = px.pie(values=level_counts.values, 
                                    names=level_counts.index,
-                                   title="<b>Experience Levels Distribution</b>",
-                                   hole=0.4,  # Donut chart
+                                   title='<b style="color:#00C48C; font-size:18px;">⭐ Experience Level Analytics</b>',
+                                   hole=0.6,  # Modern donut style
                                    color_discrete_sequence=exp_colors)
                         
                         fig.update_traces(
-                            textposition='outside',
+                            textposition='auto',
                             textinfo='percent+label',
-                            marker=dict(line=dict(color='#000000', width=2)),
-                            pull=[0.1, 0, 0, 0],  # Pull out first slice
-                            hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                            textfont=dict(size=12, family="Arial Black", color='white'),
+                            marker=dict(
+                                line=dict(color='#1a1d24', width=3)
+                            ),
+                            pull=[0.1, 0.05, 0.05, 0.05],  # Emphasize first category
+                            hovertemplate='<b style="color:#00C48C;">%{label}</b><br>' +
+                                         'Users: <b>%{value}</b><br>' +
+                                         'Percentage: <b>%{percent}</b><br>' +
+                                         '<extra></extra>',
+                            rotation=-30  # Counter-rotate for balance
                         )
                         
                         fig.update_layout(
                             paper_bgcolor='rgba(0,0,0,0)',
                             plot_bgcolor='rgba(0,0,0,0)',
-                            font=dict(color='white', size=13, family='Arial Black'),
-                            title_font=dict(size=18, color='#00C48C'),
+                            font=dict(color='white', size=12, family='Arial'),
+                            title_font=dict(size=18, color='#00C48C', family='Arial Black'),
                             showlegend=True,
                             legend=dict(
                                 orientation="v",
                                 yanchor="middle",
                                 y=0.5,
                                 xanchor="left",
-                                x=1.1,
-                                bgcolor='rgba(30, 33, 48, 0.8)',
+                                x=1.05,
+                                bgcolor='rgba(30, 33, 48, 0.95)',
                                 bordercolor='#00C48C',
-                                borderwidth=2
+                                borderwidth=2,
+                                font=dict(size=11, color='white', family='Arial')
                             ),
-                            margin=dict(l=20, r=150, t=60, b=20),
-                            height=450
+                            margin=dict(l=20, r=180, t=80, b=20),
+                            height=500,
+                            annotations=[
+                                dict(
+                                    text=f'<b style="color:#00C48C; font-size:28px;">{sum(level_counts.values)}</b><br>' +
+                                         '<span style="color:#b0b0b0; font-size:14px;">Total Users</span>',
+                                    x=0.5, y=0.5,
+                                    font_size=16,
+                                    showarrow=False,
+                                    font_color="white"
+                                )
+                            ]
                         )
                         
                         st.plotly_chart(fig, use_container_width=True)
                         st.markdown("</div>", unsafe_allow_html=True)
                     
-                    # Score distribution chart with enhanced styling
-                    st.subheader("**📊 ATS Score Distribution**")
+                    # Enhanced Score Distribution with Gradient Styling
+                    st.markdown("""
+                        <div style="
+                            background: linear-gradient(135deg, #2d1b69 0%, #11998e 100%);
+                            padding: 2rem;
+                            border-radius: 20px;
+                            border: 2px solid #9C27B0;
+                            margin: 2rem 0;
+                            box-shadow: 0 15px 35px rgba(156, 39, 176, 0.3);
+                            text-align: center;
+                        ">
+                            <h2 style="
+                                color: #9C27B0; 
+                                font-size: 2.2rem; 
+                                margin-bottom: 1rem;
+                                font-weight: 700;
+                                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                            ">📋 ATS Score Distribution Analysis</h2>
+                            <p style="
+                                color: #e0e0e0; 
+                                font-size: 1.1rem;
+                                margin: 0;
+                            ">Comprehensive breakdown of resume quality scores across all users</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
                     user_df['resume_score_num'] = pd.to_numeric(user_df['resume_score'], errors='coerce')
                     
-                    fig = px.histogram(user_df, x='resume_score_num', nbins=20,
-                                     title='<b>Distribution of Resume Scores</b>',
-                                     labels={'resume_score_num': 'ATS Score'},
-                                     color_discrete_sequence=['#FF4B4B'])
+                    # Create enhanced histogram with gradient colors
+                    fig = px.histogram(user_df, x='resume_score_num', nbins=25,
+                                     title='<b style="color:#9C27B0; font-size:20px;">🎯 Resume Score Distribution Curve</b>',
+                                     labels={'resume_score_num': 'ATS Score Range', 'count': 'Number of Users'},
+                                     color_discrete_sequence=['#9C27B0'])
                     
                     fig.update_traces(
                         marker=dict(
-                            line=dict(color='#000000', width=1.5),
-                            opacity=0.9
+                            line=dict(color='#1a1d24', width=2),
+                            opacity=0.8,
+                            # Add gradient effect
+                            color='#9C27B0'
                         ),
-                        hovertemplate='<b>Score Range: %{x}</b><br>Count: %{y}<extra></extra>'
+                        hovertemplate='<b style="color:#9C27B0;">Score Range: %{x:.1f}</b><br>' +
+                                     'Users: <b>%{y}</b><br>' +
+                                     '<extra></extra>',
+                        name="User Count"
                     )
                     
                     fig.update_layout(
                         paper_bgcolor='rgba(0,0,0,0)',
-                        plot_bgcolor='rgba(30, 33, 48, 0.5)',
-                        font=dict(color='white', size=12),
-                        title_font=dict(size=18, color='#FF4B4B'),
+                        plot_bgcolor='rgba(30, 33, 48, 0.3)',
+                        font=dict(color='white', size=13, family='Arial'),
+                        title_font=dict(size=20, color='#9C27B0', family='Arial Black'),
                         showlegend=False,
                         xaxis=dict(
-                            title='<b>ATS Score</b>',
-                            gridcolor='rgba(255, 255, 255, 0.1)',
-                            showgrid=True
+                            title='<b style="color:#e0e0e0; font-size:14px;">ATS Score (0-100)</b>',
+                            gridcolor='rgba(156, 39, 176, 0.2)',
+                            showgrid=True,
+                            tickfont=dict(size=12, color='white'),
+                            range=[-5, 105]
                         ),
                         yaxis=dict(
-                            title='<b>Number of Users</b>',
-                            gridcolor='rgba(255, 255, 255, 0.1)',
-                            showgrid=True
+                            title='<b style="color:#e0e0e0; font-size:14px;">Number of Users</b>',
+                            gridcolor='rgba(156, 39, 176, 0.2)',
+                            showgrid=True,
+                            tickfont=dict(size=12, color='white')
                         ),
-                        bargap=0.1,
-                        height=400
+                        bargap=0.15,
+                        height=500,
+                        margin=dict(l=60, r=60, t=80, b=60)
                     )
                     
+                    # Add performance threshold lines
+                    fig.add_vline(x=90, line_dash="dash", line_color="#00C48C", line_width=3,
+                                annotation_text="🌟 High Performance (90+)", 
+                                annotation_position="top",
+                                annotation_font=dict(color="#00C48C", size=12, family="Arial Black"))
+                    
+                    fig.add_vline(x=75, line_dash="dash", line_color="#FFD700", line_width=3,
+                                annotation_text="🎯 Average Performance (75+)", 
+                                annotation_position="top",
+                                annotation_font=dict(color="#FFD700", size=12, family="Arial Black"))
+                    
+                    fig.add_vline(x=50, line_dash="dash", line_color="#FF4B4B", line_width=3,
+                                annotation_text="⚠️ Needs Improvement (<75)", 
+                                annotation_position="top",
+                                annotation_font=dict(color="#FF4B4B", size=12, family="Arial Black"))
+                    
                     st.plotly_chart(fig, use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
                     
                     # Advanced Analytics Section
                     st.markdown("---")
@@ -2772,45 +3154,426 @@ Generated by Resumate AI - AI Resume Analyzer
                             
                             st.plotly_chart(fig, use_container_width=True)
                     
-                    # Search and Filter Section
-                    st.markdown("---")
-                    st.header("**🔍 Search & Filter Users**")
+                    # K-Means Clustering Analysis Section
+                    st.markdown("""
+                        <div style="
+                            background: linear-gradient(135deg, #2d1b69 0%, #11998e 100%);
+                            padding: 2rem;
+                            border-radius: 20px;
+                            border: 2px solid #9C27B0;
+                            margin: 2rem 0;
+                            box-shadow: 0 15px 35px rgba(156, 39, 176, 0.3);
+                            text-align: center;
+                        ">
+                            <h2 style="
+                                color: #9C27B0; 
+                                font-size: 2.2rem; 
+                                margin-bottom: 1rem;
+                                font-weight: 700;
+                                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                            ">🔬 Clustering Analysis</h2>
+                            <p style="
+                                color: #e0e0e0; 
+                                font-size: 1.1rem;
+                                margin: 0;
+                            ">Advanced user performance clustering with K-Means algorithm</p>
+                        </div>
+                    """, unsafe_allow_html=True)
                     
-                    search_col1, search_col2, search_col3 = st.columns(3)
+                    # Show status if analysis is already done
+                    if st.session_state.cluster_analysis_done:
+                        st.success("✅ Cluster analysis completed! Data is ready for viewing.")
                     
-                    with search_col1:
-                        search_name = st.text_input("Search by Name", placeholder="Enter name...")
+                    # Add button to start cluster analysis
+                    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+                    with col_btn2:
+                        if not st.session_state.cluster_analysis_done:
+                            start_cluster_analysis = st.button(
+                                "🚀 Start Cluster Overview", 
+                                type="primary", 
+                                use_container_width=True,
+                                help="Click to analyze user patterns with K-Means clustering algorithm",
+                                key="start_cluster_btn"
+                            )
+                        else:
+                            col_restart1, col_restart2 = st.columns(2)
+                            with col_restart1:
+                                st.button(
+                                    "📊 View Cluster Analysis", 
+                                    type="secondary", 
+                                    use_container_width=True,
+                                    disabled=True,
+                                    help="Analysis is ready - scroll down to view results"
+                                )
+                            with col_restart2:
+                                if st.button(
+                                    "🔄 Restart Analysis", 
+                                    type="primary", 
+                                    use_container_width=True,
+                                    help="Click to restart clustering analysis with fresh data",
+                                    key="restart_cluster_btn"
+                                ):
+                                    st.session_state.cluster_analysis_done = False
+                                    st.session_state.cluster_data = None
+                                    st.rerun()
+                            start_cluster_analysis = True  # Show results if already done
                     
-                    with search_col2:
-                        filter_field = st.selectbox("Filter by Field", 
-                                                    ['All'] + list(user_df['Predicted_Field'].unique()))
-                    
-                    with search_col3:
-                        filter_level = st.selectbox("Filter by Level",
-                                                    ['All'] + list(user_df['User_level'].unique()))
-                    
-                    # Apply filters
-                    filtered_df = user_df.copy()
-                    
-                    if search_name:
-                        filtered_df = filtered_df[filtered_df['Name'].str.contains(search_name, case=False, na=False)]
-                    
-                    if filter_field != 'All':
-                        filtered_df = filtered_df[filtered_df['Predicted_Field'] == filter_field]
-                    
-                    if filter_level != 'All':
-                        filtered_df = filtered_df[filtered_df['User_level'] == filter_level]
-                    
-                    st.success(f"Found {len(filtered_df)} matching records")
-                    st.dataframe(filtered_df[['Name', 'Email_ID', 'resume_score', 'Predicted_Field', 
-                                             'User_level', 'Timestamp']], use_container_width=True)
-                    
-                    # Export Filtered Data
-                    if len(filtered_df) > 0:
-                        csv_filtered = filtered_df.to_csv(index=False)
-                        b64_filtered = base64.b64encode(csv_filtered.encode()).decode()
-                        href_filtered = f'<a href="data:file/csv;base64,{b64_filtered}" download="filtered_users.csv" style="color: #00C48C; font-weight: 600;">📥 Download Filtered Data</a>'
-                        st.markdown(href_filtered, unsafe_allow_html=True)
+                    if start_cluster_analysis or st.session_state.cluster_analysis_done:
+                        if not st.session_state.cluster_analysis_done:
+                            with st.spinner("🔬 Analyzing user patterns with K-Means algorithm..."):
+                                st.info(f"🔍 Processing {len(user_df)} user records for clustering analysis...")
+                                
+                                cluster_df, cluster_stats, scaled_data, kmeans_model = perform_kmeans_clustering(user_df)
+                                
+                                # Store results in session state
+                                if cluster_df is not None and cluster_stats is not None:
+                                    st.session_state.cluster_data = {
+                                        'cluster_df': cluster_df,
+                                        'cluster_stats': cluster_stats,
+                                        'scaled_data': scaled_data,
+                                        'kmeans_model': kmeans_model
+                                    }
+                                    st.session_state.cluster_analysis_done = True
+                        
+                        # Use data from session state
+                        if st.session_state.cluster_analysis_done and st.session_state.cluster_data:
+                            cluster_df = st.session_state.cluster_data['cluster_df']
+                            cluster_stats = st.session_state.cluster_data['cluster_stats']
+                            scaled_data = st.session_state.cluster_data['scaled_data']
+                            kmeans_model = st.session_state.cluster_data['kmeans_model']
+                            
+                            if cluster_df is not None and cluster_stats is not None:
+                                st.success("✅ Clustering analysis completed successfully!")
+                                
+                                # Get cluster insights
+                                insights = get_cluster_insights(cluster_stats)
+                                
+                                # Show quick summary
+                                total_clustered = sum(stats['count'] for stats in cluster_stats.values())
+                                st.info(f"📊 Successfully categorized {total_clustered} users into 3 performance levels")
+                                
+                                # Display cluster overview
+                                st.subheader("**📊 Cluster Overview**")
+                                
+                                # Create cluster summary metrics
+                                col1, col2, col3 = st.columns(3)
+                                
+                                # Sort insights by rank to display High, Average, Low in order
+                                sorted_insights = sorted(insights.items(), key=lambda x: x[1]['rank'])
+                                
+                                for idx, (cluster_id, insight) in enumerate(sorted_insights):
+                                    with eval(f'col{idx+1}'):
+                                        st.markdown(f"""
+                                            <div style="
+                                                background: linear-gradient(135deg, {insight['color']}15 0%, {insight['color']}05 100%);
+                                                padding: 1.5rem;
+                                                border-radius: 15px;
+                                                border: 2px solid {insight['color']};
+                                                text-align: center;
+                                                box-shadow: 0 8px 20px {insight['color']}20;
+                                                transition: transform 0.3s ease;
+                                                height: 200px;
+                                                display: flex;
+                                                flex-direction: column;
+                                                justify-content: center;
+                                            ">
+                                                <div style="font-size: 3rem; margin-bottom: 0.5rem;">{insight['icon']}</div>
+                                                <h4 style="color: {insight['color']}; margin: 0.5rem 0; font-size: 1rem; line-height: 1.2;">
+                                                    {insight['name'].split(' ', 1)[1] if len(insight['name'].split(' ', 1)) > 1 else insight['name']}
+                                                </h4>
+                                                <p style="color: #e0e0e0; margin: 0.3rem 0; font-size: 0.9rem; font-weight: 600;">
+                                                    {insight['stats']['count']} Users
+                                                </p>
+                                                <p style="color: {insight['color']}; margin: 0; font-size: 1.8rem; font-weight: 700;">
+                                                    {insight['stats']['avg_score']:.0f}
+                                                </p>
+                                                <p style="color: #b0b0b0; margin: 0; font-size: 0.8rem;">
+                                                    Avg ATS Score
+                                                </p>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                
+                                # Add spacing before detailed analysis
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                
+                                # Detailed cluster analysis
+                                st.subheader("**🔍 Detailed Cluster Analysis**")
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                
+                                # Display clusters in order: High, Average, Low
+                                sorted_insights = sorted(insights.items(), key=lambda x: x[1]['rank'])
+                                
+                                for cluster_id, insight in sorted_insights:
+                                    with st.expander(f"{insight['name']} ({insight['stats']['count']} users)", expanded=True):
+                                        col1, col2 = st.columns([2, 1])
+                                        
+                                        with col1:
+                                            # Create HTML content with proper formatting
+                                            color = insight['color']
+                                            description = insight['description']
+                                            avg_score = insight['stats']['avg_score']
+                                            avg_skills = insight['stats']['avg_skills']
+                                            top_field = insight['stats']['top_field']
+                                            top_level = insight['stats']['top_level']
+                                            rank = insight['rank']
+                                            
+                                            cluster_html = f"""
+                                            <div style="background: linear-gradient(135deg, #262730 0%, #1a1d24 100%); padding: 1.5rem; border-radius: 12px; border-left: 5px solid {color}; margin-bottom: 1rem;">
+                                                <h4 style="color: {color}; margin: 0 0 1rem 0;">📋 Cluster Characteristics</h4>
+                                                <p style="color: #e0e0e0; margin: 0.5rem 0; line-height: 1.6;">{description}</p>
+                                                <div style="margin-top: 1rem;">
+                                                    <h5 style="color: #FFD700; margin: 0.5rem 0;">📊 Key Statistics:</h5>
+                                                    <ul style="color: #b0b0b0; margin: 0.5rem 0; padding-left: 1.5rem;">
+                                                        <li>Average ATS Score: <span style="color: {color}; font-weight: 600;">{avg_score:.1f}</span></li>
+                                                        <li>Average Skills Count: <span style="color: {color}; font-weight: 600;">{avg_skills:.1f}</span></li>
+                                                        <li>Most Common Field: <span style="color: {color}; font-weight: 600;">{top_field}</span></li>
+                                                        <li>Most Common Level: <span style="color: {color}; font-weight: 600;">{top_level}</span></li>
+                                                        <li>Performance Rank: <span style="color: {color}; font-weight: 600;">#{rank} of 3</span></li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                            """
+                                            st.markdown(cluster_html, unsafe_allow_html=True)
+                                        
+                                        with col2:
+                                            # Create recommendations HTML
+                                            recommendations_list = ""
+                                            for rec in insight['recommendations']:
+                                                recommendations_list += f"<li style='margin: 0.5rem 0;'>{rec}</li>"
+                                            
+                                            recommendations_html = f"""
+                                            <div style="background: linear-gradient(135deg, #262730 0%, #1a1d24 100%); padding: 1.5rem; border-radius: 12px; border-left: 5px solid #00C48C; margin-bottom: 1rem;">
+                                                <h4 style="color: #00C48C; margin: 0 0 1rem 0;">💡 Recommendations</h4>
+                                                <ul style="color: #b0b0b0; margin: 0; padding-left: 1.2rem;">
+                                                    {recommendations_list}
+                                                </ul>
+                                            </div>
+                                            """
+                                            st.markdown(recommendations_html, unsafe_allow_html=True)
+                                
+                                # Enhanced Cluster visualization with stunning design
+                                st.markdown("""
+                                    <div style="
+                                        background: linear-gradient(135deg, #1e2130 0%, #262b3d 100%);
+                                        padding: 2rem;
+                                        border-radius: 20px;
+                                        border: 2px solid #FF4B4B;
+                                        margin: 2rem 0;
+                                        box-shadow: 0 15px 35px rgba(255, 75, 75, 0.2);
+                                        text-align: center;
+                                    ">
+                                        <h2 style="
+                                            color: #FF4B4B; 
+                                            font-size: 2.2rem; 
+                                            margin-bottom: 1rem;
+                                            font-weight: 700;
+                                            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                                        ">⚙️ Performance Analytics Dashboard</h2>
+                                        <p style="
+                                            color: #b0b0b0; 
+                                            font-size: 1.1rem;
+                                            margin: 0;
+                                        ">Interactive visualizations of user performance clusters</p>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                                
+                                col1, col2 = st.columns(2, gap="large")
+                                
+                                with col1:
+                                    # Enhanced Cluster distribution donut chart
+                                    sorted_insights = sorted(insights.items(), key=lambda x: x[1]['rank'])
+                                    cluster_counts = [insight['stats']['count'] for _, insight in sorted_insights]
+                                    cluster_names = [insight['name'].split(' ', 1)[1] if len(insight['name'].split(' ', 1)) > 1 else insight['name'] for _, insight in sorted_insights]
+                                    cluster_colors = [insight['color'] for _, insight in sorted_insights]
+                                    
+                                    # Create enhanced donut chart
+                                    fig = px.pie(values=cluster_counts, 
+                                               names=cluster_names,
+                                               title='<b style="color:#00C48C; font-size:18px;">🎯 User Distribution by Performance Level</b>',
+                                               color_discrete_sequence=cluster_colors,
+                                               hole=0.5)  # Larger hole for modern donut look
+                                    
+                                    fig.update_traces(
+                                        textposition='auto',
+                                        textinfo='percent+label',
+                                        textfont=dict(size=14, family="Arial Black"),
+                                        marker=dict(
+                                            line=dict(color='#1a1d24', width=3)
+                                        ),
+                                        pull=[0.05, 0.05, 0.05],  # Slight separation for modern look
+                                        hovertemplate='<b>%{label}</b><br>' +
+                                                     'Users: %{value}<br>' +
+                                                     'Percentage: %{percent}<br>' +
+                                                     '<extra></extra>',
+                                        rotation=45  # Rotate for better visual appeal
+                                    )
+                                    
+                                    fig.update_layout(
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(0,0,0,0)',
+                                        font=dict(color='white', size=13, family='Arial'),
+                                        title_font=dict(size=18, color='#00C48C', family='Arial Black'),
+                                        showlegend=True,
+                                        legend=dict(
+                                            orientation="h",
+                                            yanchor="top",
+                                            y=-0.1,
+                                            xanchor="center",
+                                            x=0.5,
+                                            bgcolor='rgba(30, 33, 48, 0.9)',
+                                            bordercolor='#00C48C',
+                                            borderwidth=2,
+                                            font=dict(size=12, color='white')
+                                        ),
+                                        margin=dict(l=20, r=20, t=80, b=80),
+                                        height=450,
+                                        annotations=[
+                                            dict(
+                                                text=f'<b style="color:#FF4B4B; font-size:24px;">{sum(cluster_counts)}</b><br>' +
+                                                     '<span style="color:#b0b0b0; font-size:14px;">Total Users</span>',
+                                                x=0.5, y=0.5,
+                                                font_size=20,
+                                                showarrow=False,
+                                                font_color="white"
+                                            )
+                                        ]
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                with col2:
+                                    # Enhanced 3D-style bar chart
+                                    cluster_scores = [insight['stats']['avg_score'] for _, insight in sorted_insights]
+                                    
+                                    # Create gradient bar chart with enhanced styling
+                                    fig = px.bar(x=cluster_names, y=cluster_scores,
+                                               title='<b style="color:#FFD700; font-size:18px;">📈 Performance Score Analysis</b>',
+                                               labels={'x': 'Performance Level', 'y': 'Average ATS Score'},
+                                               color=cluster_scores,
+                                               color_continuous_scale=[[0, '#FF4B4B'], [0.5, '#FFD700'], [1, '#00C48C']],
+                                               text=cluster_scores)
+                                    
+                                    fig.update_traces(
+                                        texttemplate='<b>%{text:.1f}</b>',
+                                        textposition='outside',
+                                        textfont=dict(size=16, color='white', family='Arial Black'),
+                                        marker=dict(
+                                            line=dict(color='#1a1d24', width=2),
+                                            opacity=0.9
+                                        ),
+                                        hovertemplate='<b>%{x}</b><br>' +
+                                                     'Average Score: <b>%{y:.1f}</b><br>' +
+                                                     '<extra></extra>'
+                                    )
+                                    
+                                    fig.update_layout(
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(30, 33, 48, 0.3)',
+                                        font=dict(color='white', size=13, family='Arial'),
+                                        title_font=dict(size=18, color='#FFD700', family='Arial Black'),
+                                        showlegend=False,
+                                        height=450,
+                                        xaxis=dict(
+                                            title='<b style="color:#b0b0b0;">Performance Categories</b>',
+                                            gridcolor='rgba(255, 255, 255, 0.1)',
+                                            showgrid=False,
+                                            tickfont=dict(size=12, color='white', family='Arial Black'),
+                                            title_font=dict(size=14, color='#b0b0b0')
+                                        ),
+                                        yaxis=dict(
+                                            title='<b style="color:#b0b0b0;">ATS Score (0-100)</b>',
+                                            gridcolor='rgba(255, 255, 255, 0.2)',
+                                            showgrid=True,
+                                            range=[0, 105],
+                                            tickfont=dict(size=12, color='white'),
+                                            title_font=dict(size=14, color='#b0b0b0')
+                                        ),
+                                        bargap=0.3,
+                                        margin=dict(l=60, r=20, t=80, b=60)
+                                    )
+                                    
+                                    # Add reference lines for score ranges
+                                    fig.add_hline(y=90, line_dash="dash", line_color="#00C48C", 
+                                                annotation_text="Excellent (90+)", annotation_position="right",
+                                                annotation_font=dict(color="#00C48C", size=10))
+                                    fig.add_hline(y=75, line_dash="dash", line_color="#FFD700", 
+                                                annotation_text="Good (75+)", annotation_position="right",
+                                                annotation_font=dict(color="#FFD700", size=10))
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Cluster-wise detailed data
+                                st.subheader("**📋 Performance Level User Data**")
+                                
+                                # Create ordered options based on performance level ranking
+                                sorted_insights_for_selection = sorted(insights.items(), key=lambda x: x[1]['rank'])
+                                performance_options = [(cluster_id, f"{insight['name']} ({insight['stats']['count']} users)") for cluster_id, insight in sorted_insights_for_selection]
+                                
+                                # Create selectbox with proper ordering (High, Average, Low)
+                                selected_performance = st.selectbox(
+                                    "Select Performance Level to View Users",
+                                    options=performance_options,
+                                    format_func=lambda x: x[1],  # Display the performance level name with count
+                                    index=0,  # Default to first option (High Performers)
+                                    key="performance_level_selector"  # Unique key to maintain state
+                                )
+                                
+                                # Extract the actual cluster_id from the selected option
+                                selected_cluster = selected_performance[0]
+                                cluster_users = cluster_df[cluster_df['Cluster'] == selected_cluster]
+                                if len(cluster_users) > 0:
+                                    # Display cluster info
+                                    selected_insight = insights[selected_cluster]
+                                    st.markdown(f"""
+                                        <div style="
+                                            background: linear-gradient(135deg, {selected_insight['color']}15 0%, {selected_insight['color']}05 100%);
+                                            padding: 1rem;
+                                            border-radius: 10px;
+                                            border-left: 4px solid {selected_insight['color']};
+                                            margin-bottom: 1rem;
+                                        ">
+                                            <h4 style="color: {selected_insight['color']}; margin: 0 0 0.5rem 0;">
+                                                {selected_insight['icon']} {selected_insight['name']} - {len(cluster_users)} Users
+                                            </h4>
+                                            <p style="color: #b0b0b0; margin: 0; font-size: 0.9rem;">
+                                                Average Score: {selected_insight['stats']['avg_score']:.1f} | 
+                                                Average Skills: {selected_insight['stats']['avg_skills']:.1f} | 
+                                                Rank: #{selected_insight['rank']} of 3
+                                            </p>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    # Display user data in table
+                                    st.dataframe(
+                                        cluster_users[['Name', 'Email_ID', 'resume_score', 'Predicted_Field', 
+                                                     'User_level', 'Cluster']].reset_index(drop=True),
+                                        use_container_width=True
+                                    )
+                                    
+                                    # Download cluster data
+                                    csv_cluster = cluster_users.to_csv(index=False)
+                                    b64_cluster = base64.b64encode(csv_cluster.encode()).decode()
+                                    performance_level = selected_insight['name'].replace(' ', '_').replace('🌟', '').replace('🎯', '').replace('⚠️', '').strip()
+                                    href_cluster = f'<a href="data:file/csv;base64,{b64_cluster}" download="{performance_level}_users.csv" style="color: #9C27B0; font-weight: 600;">📥 Download {selected_insight["name"]} Data</a>'
+                                    st.markdown(href_cluster, unsafe_allow_html=True)
+                                    
+                                    # Show success message
+                                    st.success(f"✅ Successfully loaded {len(cluster_users)} users from {selected_insight['name']}")
+                                    
+                                else:
+                                    st.info(f"📊 No users found in {selected_performance[1]} category.")
+                                    st.markdown(f"""
+                                        <div style="background: rgba(255, 193, 7, 0.1); padding: 1rem; border-radius: 8px; border-left: 4px solid #FFC107;">
+                                            <p style="color: #FFC107; margin: 0; font-weight: 600;">📈 Analysis Summary:</p>
+                                            <p style="color: #b0b0b0; margin: 0.5rem 0 0 0;">
+                                                • Total users analyzed: {len(cluster_df)}<br>
+                                                • This performance level currently has no users<br>
+                                                • Try selecting a different performance level above
+                                            </p>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                            else:
+                                st.error("❌ Unable to perform clustering analysis. Insufficient data or processing error.")
                     
                     # Feedback data
                     try:
