@@ -39,7 +39,14 @@ from pdfminer.converter import TextConverter
 # Additional imports
 from streamlit_tags import st_tags
 from PIL import Image
+try:
+    import groq
+    GROQ_AVAILABLE = True
+except ImportError:
+    GROQ_AVAILABLE = False
 import plotly.express as px
+
+
 
 # Download NLTK data
 try:
@@ -200,6 +207,8 @@ st.markdown("""
         border-color: #FF4B4B;
         box-shadow: 0 0 0 2px rgba(255, 75, 75, 0.2);
     }
+    
+
     </style>
 """, unsafe_allow_html=True)
 
@@ -212,6 +221,7 @@ RESUME_DIR.mkdir(exist_ok=True)
 
 USER_DATA_CSV = CSV_DIR / 'users.csv'
 FEEDBACK_CSV = CSV_DIR / 'feedback.csv'
+INTERVIEW_CSV = CSV_DIR / 'interviews.csv'
 
 # ==================== API Keys ====================
 GROQ_API_KEY = "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"
@@ -251,6 +261,11 @@ def init_csv_files():
     
     if not FEEDBACK_CSV.exists():
         pd.DataFrame(columns=['ID', 'feed_name', 'feed_email', 'feed_score', 'comments', 'Timestamp']).to_csv(FEEDBACK_CSV, index=False)
+    
+    if not INTERVIEW_CSV.exists():
+        pd.DataFrame(columns=['ID', 'user_name', 'user_email', 'predicted_field', 'difficulty_level', 
+                             'total_questions', 'correct_answers', 'overall_score', 'time_taken', 
+                             'interview_feedback', 'timestamp']).to_csv(INTERVIEW_CSV, index=False)
 
 def get_next_id(csv_path):
     try:
@@ -623,6 +638,336 @@ def insertf_data(feed_name, feed_email, feed_score, comments, Timestamp):
         st.error(f"Error saving feedback: {e}")
         return False
 
+def insert_interview_data(user_name, user_email, predicted_field, difficulty_level, total_questions, 
+                         correct_answers, overall_score, time_taken, interview_feedback, timestamp):
+    try:
+        df = pd.read_csv(INTERVIEW_CSV)
+        new_id = get_next_id(INTERVIEW_CSV)
+        
+        new_row = {
+            'ID': new_id, 'user_name': user_name, 'user_email': user_email, 
+            'predicted_field': predicted_field, 'difficulty_level': difficulty_level,
+            'total_questions': total_questions, 'correct_answers': correct_answers,
+            'overall_score': overall_score, 'time_taken': time_taken,
+            'interview_feedback': interview_feedback, 'timestamp': timestamp
+        }
+        
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        df.to_csv(INTERVIEW_CSV, index=False)
+        return True
+    except Exception as e:
+        st.error(f"Error saving interview data: {e}")
+        return False
+
+def generate_interview_questions(predicted_field, difficulty_level, num_questions):
+    """Generate interview questions using GROQ API"""
+    try:
+        import groq
+        
+        client = groq.Groq(api_key=GROQ_API_KEY)
+        
+        prompt = f"""
+        Generate exactly {num_questions} {difficulty_level} level interview questions for a {predicted_field} role.
+        
+        Requirements:
+        - Generate EXACTLY {num_questions} questions (not more, not less)
+        - Questions should be relevant to {predicted_field}
+        - Difficulty: {difficulty_level}
+        - Include a mix of technical and behavioral questions
+        - For technical questions, include brief expected answer points
+        
+        Format each question as:
+        Q: [Question]
+        Expected: [Brief expected answer points]
+        ---
+        
+        IMPORTANT: Generate exactly {num_questions} questions separated by --- delimiter.
+        """
+        
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama3-8b-8192",
+            temperature=0.7,
+            max_tokens=3000
+        )
+        
+        questions_text = response.choices[0].message.content
+        
+        # Parse questions
+        questions = []
+        question_blocks = questions_text.split('---')
+        
+        for block in question_blocks:
+            if 'Q:' in block and 'Expected:' in block:
+                lines = block.strip().split('\n')
+                question = ""
+                expected = ""
+                
+                for line in lines:
+                    if line.startswith('Q:'):
+                        question = line[2:].strip()
+                    elif line.startswith('Expected:'):
+                        expected = line[9:].strip()
+                
+                if question and expected:
+                    questions.append({
+                        'question': question,
+                        'expected_answer': expected
+                    })
+        
+        # Ensure we have enough questions - if not, generate more from fallback
+        if len(questions) < num_questions:
+            fallback_needed = num_questions - len(questions)
+            fallback_qs = get_fallback_questions(predicted_field)
+            questions.extend(fallback_qs[:fallback_needed])
+        
+        return questions[:num_questions]
+        
+    except Exception as e:
+        st.error(f"Error generating questions: {e}")
+        # Use fallback questions
+        return get_fallback_questions(predicted_field, num_questions)
+
+def get_fallback_questions(predicted_field, num_questions=10):
+    """Get fallback questions when API fails"""
+    fallback_questions = {
+        'Data Science': [
+            {'question': 'Explain the difference between supervised and unsupervised learning.', 
+             'expected_answer': 'Supervised learning uses labeled data, unsupervised finds patterns in unlabeled data'},
+            {'question': 'What is overfitting and how can you prevent it?', 
+             'expected_answer': 'Model memorizes training data, prevent with regularization, cross-validation, more data'},
+            {'question': 'Describe your experience with data visualization tools.', 
+             'expected_answer': 'Experience with tools like matplotlib, seaborn, tableau, creating meaningful visualizations'},
+            {'question': 'How do you handle missing data in datasets?', 
+             'expected_answer': 'Remove rows, impute values, use algorithms that handle missing data'},
+            {'question': 'What is the difference between bagging and boosting?', 
+             'expected_answer': 'Bagging trains models in parallel, boosting trains sequentially learning from errors'},
+            {'question': 'Explain the bias-variance tradeoff.', 
+             'expected_answer': 'Bias is error from oversimplification, variance from sensitivity to small data changes'},
+            {'question': 'How do you evaluate a machine learning model?', 
+             'expected_answer': 'Use metrics like accuracy, precision, recall, F1-score, cross-validation'},
+            {'question': 'What is feature engineering and why is it important?', 
+             'expected_answer': 'Creating relevant features from raw data to improve model performance'},
+            {'question': 'Describe the steps in a typical data science project.', 
+             'expected_answer': 'Problem definition, data collection, cleaning, exploration, modeling, evaluation, deployment'},
+            {'question': 'What are the assumptions of linear regression?', 
+             'expected_answer': 'Linearity, independence, homoscedasticity, normality of residuals'},
+            {'question': 'How do you handle imbalanced datasets?', 
+             'expected_answer': 'Resampling, cost-sensitive learning, ensemble methods, different evaluation metrics'},
+            {'question': 'What is the difference between correlation and causation?', 
+             'expected_answer': 'Correlation shows relationship, causation shows one variable causes another'},
+            {'question': 'Explain principal component analysis (PCA).', 
+             'expected_answer': 'Dimensionality reduction technique that finds principal components explaining most variance'},
+            {'question': 'What is cross-validation and why is it used?', 
+             'expected_answer': 'Technique to assess model performance by splitting data into train/validation sets multiple times'},
+            {'question': 'How would you explain a complex model to a non-technical stakeholder?', 
+             'expected_answer': 'Use simple analogies, visualizations, focus on business impact rather than technical details'}
+        ],
+        'Web Development': [
+            {'question': 'What is the difference between HTML, CSS, and JavaScript?', 
+             'expected_answer': 'HTML structure, CSS styling, JavaScript functionality and interactivity'},
+            {'question': 'Explain RESTful APIs and their principles.', 
+             'expected_answer': 'REST uses HTTP methods, stateless, resource-based URLs, JSON responses'},
+            {'question': 'How do you ensure website security?', 
+             'expected_answer': 'HTTPS, input validation, authentication, authorization, SQL injection prevention'},
+            {'question': 'What is the difference between GET and POST requests?', 
+             'expected_answer': 'GET retrieves data, POST sends data, GET is idempotent, POST is not'},
+            {'question': 'Explain the concept of responsive web design.', 
+             'expected_answer': 'Design that adapts to different screen sizes using flexible layouts and media queries'},
+            {'question': 'What are the advantages of using a CSS framework?', 
+             'expected_answer': 'Faster development, consistency, responsive grid systems, pre-built components'},
+            {'question': 'How do you optimize website performance?', 
+             'expected_answer': 'Minify files, optimize images, use CDN, reduce HTTP requests, enable caching'},
+            {'question': 'What is the difference between local storage and session storage?', 
+             'expected_answer': 'Local storage persists until manually cleared, session storage clears when tab closes'},
+            {'question': 'Explain the concept of CORS.', 
+             'expected_answer': 'Cross-Origin Resource Sharing allows restricted resources to be requested from another domain'},
+            {'question': 'What is the purpose of a CSS preprocessor?', 
+             'expected_answer': 'Extends CSS with variables, nesting, mixins, functions for better maintainability'},
+            {'question': 'How do you handle errors in JavaScript?', 
+             'expected_answer': 'Try-catch blocks, error objects, proper error handling and logging'},
+            {'question': 'What is the difference between synchronous and asynchronous JavaScript?', 
+             'expected_answer': 'Synchronous blocks execution, asynchronous allows non-blocking operations'},
+            {'question': 'Explain the concept of semantic HTML.', 
+             'expected_answer': 'Using HTML elements according to their meaning, improving accessibility and SEO'},
+            {'question': 'What are web accessibility standards?', 
+             'expected_answer': 'Guidelines to make websites usable by people with disabilities, following WCAG standards'},
+            {'question': 'How do you test a web application?', 
+             'expected_answer': 'Unit tests, integration tests, cross-browser testing, performance testing, user testing'}
+        ],
+        'Mobile Development': [
+            {'question': 'What is the difference between native and hybrid mobile apps?', 
+             'expected_answer': 'Native apps are platform-specific, hybrid apps use web technologies in native container'},
+            {'question': 'Explain the mobile app development lifecycle.', 
+             'expected_answer': 'Planning, design, development, testing, deployment, maintenance'},
+            {'question': 'How do you handle different screen sizes in mobile development?', 
+             'expected_answer': 'Responsive design, flexible layouts, density-independent pixels, testing on various devices'},
+            {'question': 'What are the key considerations for mobile app performance?', 
+             'expected_answer': 'Memory management, battery usage, network efficiency, smooth animations'},
+            {'question': 'How do you implement push notifications?', 
+             'expected_answer': 'Use platform services like FCM for Android, APNs for iOS, handle registration and delivery'},
+            {'question': 'What is the difference between Android and iOS development?', 
+             'expected_answer': 'Different languages, IDEs, design guidelines, app store policies'},
+            {'question': 'How do you store data locally in mobile apps?', 
+             'expected_answer': 'SQLite databases, shared preferences, file storage, key-value stores'},
+            {'question': 'Explain mobile app security best practices.', 
+             'expected_answer': 'Secure data transmission, encryption, authentication, secure storage, code obfuscation'},
+            {'question': 'What is React Native and what are its advantages?', 
+             'expected_answer': 'Cross-platform framework using React, code reuse, native performance, hot reloading'},
+            {'question': 'How do you optimize mobile app for battery life?', 
+             'expected_answer': 'Efficient algorithms, reduce background tasks, optimize network calls, manage GPS usage'},
+            {'question': 'What are the different types of mobile app testing?', 
+             'expected_answer': 'Functional, usability, performance, security, compatibility, installation testing'},
+            {'question': 'How do you handle offline functionality in mobile apps?', 
+             'expected_answer': 'Local storage, caching strategies, sync mechanisms, offline-first architecture'},
+            {'question': 'What is the importance of user experience in mobile apps?', 
+             'expected_answer': 'Critical for retention, follows platform guidelines, intuitive navigation, fast loading'},
+            {'question': 'How do you implement real-time features in mobile apps?', 
+             'expected_answer': 'WebSockets, Server-Sent Events, push notifications, real-time databases'},
+            {'question': 'What are the challenges in mobile app development?', 
+             'expected_answer': 'Multiple platforms, device fragmentation, performance constraints, security concerns'}
+        ],
+        'DevOps': [
+            {'question': 'What is DevOps and what are its benefits?', 
+             'expected_answer': 'Culture combining development and operations, faster delivery, better collaboration'},
+            {'question': 'Explain the concept of Infrastructure as Code.', 
+             'expected_answer': 'Managing infrastructure through code, version control, automation, consistency'},
+            {'question': 'What is containerization and how does Docker work?', 
+             'expected_answer': 'Packaging applications with dependencies, lightweight virtualization, portable deployments'},
+            {'question': 'How do you implement CI/CD pipelines?', 
+             'expected_answer': 'Automated build, test, deploy processes using tools like Jenkins, GitLab CI'},
+            {'question': 'What is the difference between monitoring and logging?', 
+             'expected_answer': 'Monitoring tracks system health, logging records events for debugging and analysis'},
+            {'question': 'Explain blue-green deployment strategy.', 
+             'expected_answer': 'Two identical environments, switch traffic between them for zero-downtime deployments'},
+            {'question': 'What are microservices and their advantages?', 
+             'expected_answer': 'Small, independent services, better scalability, technology diversity, fault isolation'},
+            {'question': 'How do you ensure security in DevOps?', 
+             'expected_answer': 'DevSecOps practices, security scanning, access controls, secrets management'},
+            {'question': 'What is Kubernetes and why is it used?', 
+             'expected_answer': 'Container orchestration platform, automatic scaling, service discovery, load balancing'},
+            {'question': 'How do you handle configuration management?', 
+             'expected_answer': 'Tools like Ansible, Puppet, Chef for consistent system configuration'},
+            {'question': 'What is the role of version control in DevOps?', 
+             'expected_answer': 'Track changes, collaboration, branching strategies, integration with CI/CD'},
+            {'question': 'How do you implement disaster recovery?', 
+             'expected_answer': 'Backup strategies, replication, automated failover, regular testing'},
+            {'question': 'What are the key metrics for DevOps success?', 
+             'expected_answer': 'Deployment frequency, lead time, mean time to recovery, change failure rate'},
+            {'question': 'How do you scale applications in the cloud?', 
+             'expected_answer': 'Horizontal scaling, load balancers, auto-scaling groups, database scaling'},
+            {'question': 'What is the importance of automation in DevOps?', 
+             'expected_answer': 'Reduces errors, increases speed, ensures consistency, enables scalability'}
+        ],
+        'General IT': [
+            {'question': 'Describe your problem-solving approach for technical issues.', 
+             'expected_answer': 'Analyze problem, research solutions, test hypotheses, document resolution'},
+            {'question': 'How do you stay updated with technology trends?', 
+             'expected_answer': 'Online courses, tech blogs, conferences, professional networks, hands-on practice'},
+            {'question': 'What is your experience with project management?', 
+             'expected_answer': 'Planning, resource allocation, timeline management, stakeholder communication'},
+            {'question': 'How do you handle working under pressure?', 
+             'expected_answer': 'Prioritize tasks, stay organized, communicate effectively, maintain quality'},
+            {'question': 'Describe a challenging technical project you worked on.', 
+             'expected_answer': 'Specific example with challenges faced, solutions implemented, lessons learned'},
+            {'question': 'How do you ensure code quality?', 
+             'expected_answer': 'Code reviews, testing, documentation, following best practices, continuous improvement'},
+            {'question': 'What is your approach to learning new technologies?', 
+             'expected_answer': 'Hands-on practice, documentation study, online tutorials, peer learning'},
+            {'question': 'How do you handle conflicting priorities?', 
+             'expected_answer': 'Assess urgency and impact, communicate with stakeholders, negotiate timelines'},
+            {'question': 'What role does documentation play in software development?', 
+             'expected_answer': 'Knowledge sharing, maintenance, onboarding, compliance, future reference'},
+            {'question': 'How do you collaborate with non-technical team members?', 
+             'expected_answer': 'Clear communication, avoid jargon, use visuals, focus on business value'},
+            {'question': 'What is your experience with version control systems?', 
+             'expected_answer': 'Git usage, branching strategies, merge conflicts, collaboration workflows'},
+            {'question': 'How do you approach debugging and troubleshooting?', 
+             'expected_answer': 'Systematic approach, logging, testing hypotheses, isolating issues'},
+            {'question': 'What is your understanding of software development lifecycle?', 
+             'expected_answer': 'Requirements, design, implementation, testing, deployment, maintenance'},
+            {'question': 'How do you balance technical debt with new feature development?', 
+             'expected_answer': 'Assess impact, prioritize critical debt, allocate time, communicate trade-offs'},
+            {'question': 'What motivates you in your technical career?', 
+             'expected_answer': 'Learning opportunities, solving problems, making impact, career growth'}
+        ]
+    }
+    
+    questions = fallback_questions.get(predicted_field, fallback_questions['General IT'])
+    
+    # Ensure we return exactly the requested number of questions
+    if len(questions) >= num_questions:
+        return questions[:num_questions]
+    else:
+        # Repeat questions if we don't have enough
+        repeated_questions = questions * (num_questions // len(questions) + 1)
+        return repeated_questions[:num_questions]
+
+def evaluate_answer_with_groq(question, user_answer, expected_answer):
+    """Evaluate user answer using GROQ API"""
+    try:
+        import groq
+        
+        client = groq.Groq(api_key=GROQ_API_KEY)
+        
+        prompt = f"""
+        Evaluate this interview answer on a scale of 0-100:
+        
+        Question: {question}
+        Expected Answer Points: {expected_answer}
+        User's Answer: {user_answer}
+        
+        Provide:
+        1. Score (0-100)
+        2. Brief feedback (2-3 sentences)
+        3. Suggestions for improvement
+        
+        Format:
+        SCORE: [number]
+        FEEDBACK: [feedback text]
+        SUGGESTIONS: [improvement suggestions]
+        """
+        
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama3-8b-8192",
+            temperature=0.3,
+            max_tokens=500
+        )
+        
+        evaluation = response.choices[0].message.content
+        
+        # Parse evaluation
+        score = 50  # default
+        feedback = "Answer evaluated"
+        suggestions = "Keep practicing"
+        
+        lines = evaluation.split('\n')
+        for line in lines:
+            if line.startswith('SCORE:'):
+                try:
+                    score = int(re.findall(r'\d+', line)[0])
+                except:
+                    score = 50
+            elif line.startswith('FEEDBACK:'):
+                feedback = line[9:].strip()
+            elif line.startswith('SUGGESTIONS:'):
+                suggestions = line[12:].strip()
+        
+        return score, feedback, suggestions
+        
+    except Exception as e:
+        # Fallback evaluation
+        answer_length = len(user_answer.split())
+        if answer_length < 5:
+            return 30, "Answer is too brief. Provide more detailed explanations.", "Expand your answers with examples and technical details."
+        elif answer_length > 50:
+            return 80, "Good detailed answer with comprehensive coverage.", "Keep up the good work with detailed explanations."
+        else:
+            return 60, "Decent answer but could be more detailed.", "Add more technical depth and examples to your answers."
+
+
+
 # ==================== K-Means Clustering Functions ====================
 
 def prepare_clustering_data(df):
@@ -841,14 +1186,338 @@ def main():
         """, unsafe_allow_html=True)
     
     st.sidebar.markdown("# Choose Something...")
-    activities = ["User", "Feedback", "About", "Admin"]
+    activities = ["User", "AI Interview Questions", "Feedback", "About", "Admin"]
     choice = st.sidebar.selectbox("Choose among the given options:", activities)
     
     link = '<b>Built with 🤍 by <a href="" style="text-decoration: none; color: #FF4B4B;">Team Resumate AI</a></b>'
     st.sidebar.markdown(link, unsafe_allow_html=True)
     
+# ==================== AI Interview Questions Section ====================
+    if choice == 'AI Interview Questions':
+        st.markdown("""
+            <div style='text-align: center; padding: 2rem 0; margin-bottom: 2rem;'>
+                <h1 style='
+                    font-size: 3rem; 
+                    font-weight: 800; 
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                    margin: 0;
+                '> 🛰️ AI Interview Questions</h1>
+                <p style='font-size: 1.2rem; color: #a0a0a0; margin: 1rem 0 0 0;'>
+                    Practice with AI-Generated Role-Specific Questions
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Interview Setup
+        st.markdown("""
+            <div class='stCard'>
+                <h3>🎯 Interview Setup</h3>
+                <p style='color: #a0a0a0;'>Configure your mock interview session</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # User Information
+            interview_name = st.text_input("👤 Your Name", placeholder="Enter your name")
+            interview_email = st.text_input("📧 Email", placeholder="your.email@example.com")
+            
+            # Interview Configuration
+            col_config1, col_config2 = st.columns(2)
+            
+            with col_config1:
+                career_field = st.selectbox(
+                    "🎯 Career Field",
+                    list(SKILL_CATEGORIES.keys()) + ["General IT"]
+                )
+                
+                difficulty_level = st.selectbox(
+                    "📊 Difficulty Level",
+                    ["Easy", "Medium", "Hard"]
+                )
+            
+            with col_config2:
+                num_questions = st.slider(
+                    "❓ Number of Questions",
+                    min_value=5,
+                    max_value=15,
+                    value=10
+                )
+                
+
+        
+        with col2:
+            st.markdown("""
+                <div class='info-box'>
+                    <h3>💡 Interview Tips</h3>
+                    <ul style='line-height: 1.8;'>
+                        <li><b>Prepare:</b> Review your resume</li>
+                        <li><b>Think:</b> Take time to formulate answers</li>
+                        <li><b>Detail:</b> Provide specific examples</li>
+                        <li><b>Honest:</b> Be genuine in responses</li>
+                        <li><b>Practice:</b> Regular practice improves performance</li>
+                    </ul>
+                    
+
+                </div>
+            """, unsafe_allow_html=True)
+        
+        # Start Interview Button
+        if st.button("🚀 Start AI Interview", type="primary", use_container_width=True):
+            if interview_name and interview_email:
+                # Initialize session state
+                st.session_state.interview_active = True
+                st.session_state.interview_name = interview_name
+                st.session_state.interview_email = interview_email
+                st.session_state.career_field = career_field
+                st.session_state.difficulty_level = difficulty_level
+                st.session_state.num_questions = num_questions
+
+                st.session_state.current_question = 0
+                st.session_state.interview_answers = []
+                st.session_state.interview_start_time = time.time()
+                
+                # Generate questions
+                with st.spinner("🤖 Generating personalized interview questions..."):
+                    questions = generate_interview_questions(career_field, difficulty_level, num_questions)
+                    st.session_state.interview_questions = questions
+                
+                st.rerun()
+            else:
+                st.error("Please fill in your name and email to start the interview.")
+        
+        # Interview Session
+        if st.session_state.get('interview_active', False):
+            current_q = st.session_state.current_question
+            questions = st.session_state.interview_questions
+            
+            if current_q < len(questions):
+                # Progress bar
+                progress = (current_q) / len(questions)
+                st.progress(progress)
+                
+                st.markdown(f"""
+                    <div style='text-align: center; margin: 1rem 0;'>
+                        <h4 style='color: #FF4B4B;'>Question {current_q + 1} of {len(questions)}</h4>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # Current Question
+                st.markdown(f"""
+                    <div class='stCard' style='border-left: 5px solid #667eea;'>
+                        <h3>❓ {questions[current_q]['question']}</h3>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # Answer Input
+                col_answer1, col_answer2 = st.columns([4, 1])
+                
+                with col_answer1:
+
+                    
+                    user_answer = st.text_area(
+                        "Your Answer:",
+                        placeholder="Type your detailed answer here...",
+                        height=150,
+                        key=f"answer_{current_q}"
+                    )
+                
+                with col_answer2:
+                    st.markdown("<br><br>", unsafe_allow_html=True)
+                    
+                    if st.button("📝 Submit Answer", type="primary"):
+                        if user_answer.strip():
+                            # Evaluate answer
+                            with st.spinner("🤖 Evaluating your answer..."):
+                                score, feedback, suggestions = evaluate_answer_with_groq(
+                                    questions[current_q]['question'],
+                                    user_answer,
+                                    questions[current_q]['expected_answer']
+                                )
+                            
+                            # Store answer
+                            st.session_state.interview_answers.append({
+                                'question': questions[current_q]['question'],
+                                'user_answer': user_answer,
+                                'expected_answer': questions[current_q]['expected_answer'],
+                                'score': score,
+                                'feedback': feedback,
+                                'suggestions': suggestions
+                            })
+                            
+                            # Move to next question
+                            st.session_state.current_question += 1
+                            st.rerun()
+                        else:
+                            st.error("Please provide an answer before proceeding.")
+                    
+                    if st.button("⏭️ Skip Question"):
+                        # Skip with 0 score
+                        st.session_state.interview_answers.append({
+                            'question': questions[current_q]['question'],
+                            'user_answer': "Skipped",
+                            'expected_answer': questions[current_q]['expected_answer'],
+                            'score': 0,
+                            'feedback': "Question was skipped",
+                            'suggestions': "Try to answer all questions in a real interview"
+                        })
+                        
+                        st.session_state.current_question += 1
+                        st.rerun()
+            
+            else:
+                # Interview Complete - Show Results
+                st.balloons()
+                
+                end_time = time.time()
+                time_taken = round((end_time - st.session_state.interview_start_time) / 60, 2)  # in minutes
+                
+                answers = st.session_state.interview_answers
+                total_score = sum([ans['score'] for ans in answers]) / len(answers)
+                correct_answers = sum([1 for ans in answers if ans['score'] >= 70])
+                
+                st.markdown("""
+                    <div style='text-align: center; padding: 2rem;'>
+                        <h1 style='color: #00C48C;'>🎉 Interview Complete!</h1>
+                        <p style='font-size: 1.2rem; color: #a0a0a0;'>Here's your performance analysis</p>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # Performance Metrics
+                col_metric1, col_metric2, col_metric3, col_metric4 = st.columns(4)
+                
+                with col_metric1:
+                    st.markdown(f"""
+                        <div class='metric-card'>
+                            <div class='metric-value'>{total_score:.0f}</div>
+                            <div class='metric-label'>Overall Score</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_metric2:
+                    st.markdown(f"""
+                        <div class='metric-card'>
+                            <div class='metric-value'>{correct_answers}</div>
+                            <div class='metric-label'>Good Answers</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_metric3:
+                    st.markdown(f"""
+                        <div class='metric-card'>
+                            <div class='metric-value'>{len(answers)}</div>
+                            <div class='metric-label'>Total Questions</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_metric4:
+                    st.markdown(f"""
+                        <div class='metric-card'>
+                            <div class='metric-value'>{time_taken}</div>
+                            <div class='metric-label'>Minutes</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                # Performance Analysis
+                if total_score >= 80:
+                    performance_level = "Excellent"
+                    performance_color = "#00C48C"
+                    performance_emoji = "🌟"
+                elif total_score >= 60:
+                    performance_level = "Good"
+                    performance_color = "#FFD700"
+                    performance_emoji = "👍"
+                else:
+                    performance_level = "Needs Improvement"
+                    performance_color = "#FF4B4B"
+                    performance_emoji = "📈"
+                
+                st.markdown(f"""
+                    <div class='stCard' style='border: 2px solid {performance_color}; text-align: center;'>
+                        <h2 style='color: {performance_color};'>{performance_emoji} {performance_level}</h2>
+                        <p style='font-size: 1.1rem; color: #a0a0a0;'>
+                            Your interview performance is {performance_level.lower()}. 
+                            {'Keep up the great work!' if total_score >= 80 else 'Focus on the improvement areas below.' if total_score >= 60 else 'Practice more and review the feedback carefully.'}
+                        </p>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # Detailed Question Review
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("""
+                    <div class='stCard'>
+                        <h3>📝 Question-by-Question Review</h3>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                for i, answer in enumerate(answers, 1):
+                    score_color = "#00C48C" if answer['score'] >= 70 else "#FFD700" if answer['score'] >= 40 else "#FF4B4B"
+                    
+                    with st.expander(f"Question {i}: {answer['question'][:50]}... (Score: {answer['score']})"):
+                        st.markdown(f"**Question:** {answer['question']}")
+                        st.markdown(f"**Your Answer:** {answer['user_answer']}")
+                        st.markdown(f"**Score:** <span style='color: {score_color}; font-weight: bold;'>{answer['score']}/100</span>", unsafe_allow_html=True)
+                        st.markdown(f"**Feedback:** {answer['feedback']}")
+                        st.markdown(f"**Suggestions:** {answer['suggestions']}")
+                
+                # Overall Feedback
+                overall_feedback = f"""
+                Based on your {st.session_state.difficulty_level} level {st.session_state.career_field} interview:
+                - You scored {total_score:.0f}/100 overall
+                - {correct_answers}/{len(answers)} questions answered well
+                - Completed in {time_taken} minutes
+                - Performance level: {performance_level}
+                """
+                
+                if total_score >= 80:
+                    overall_feedback += "\n- Excellent performance! You're well-prepared for interviews."
+                elif total_score >= 60:
+                    overall_feedback += "\n- Good foundation, focus on technical depth and examples."
+                else:
+                    overall_feedback += "\n- Needs significant improvement. Practice more and study the field thoroughly."
+                
+                # Save to database
+                ts = time.time()
+                cur_date = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
+                cur_time = datetime.datetime.fromtimestamp(ts).strftime('%H:%M:%S')
+                timestamp_str = str(cur_date + '_' + cur_time)
+                
+                insert_interview_data(
+                    st.session_state.interview_name,
+                    st.session_state.interview_email,
+                    st.session_state.career_field,
+                    st.session_state.difficulty_level,
+                    len(answers),
+                    correct_answers,
+                    round(total_score, 2),
+                    time_taken,
+                    overall_feedback,
+                    timestamp_str
+                )
+                
+                # Reset Interview
+                col_reset1, col_reset2 = st.columns(2)
+                
+                with col_reset1:
+                    if st.button("🔄 Take Another Interview", type="primary", use_container_width=True):
+                        # Clear session state
+                        for key in ['interview_active', 'interview_name', 'interview_email', 'career_field',
+                                  'difficulty_level', 'num_questions', 'current_question',
+                                  'interview_answers', 'interview_start_time', 'interview_questions']:
+                            if key in st.session_state:
+                                del st.session_state[key]
+                        st.rerun()
+                
+                with col_reset2:
+                    if st.button("📊 View All Results", type="secondary", use_container_width=True):
+                        st.info("Visit the Admin panel to view all interview results.")
+
 # ==================== User Page ====================
-    if choice == 'User':
+    elif choice == 'User':
         
         # Progress Tracker
         if 'user_step' not in st.session_state:
@@ -1017,6 +1686,7 @@ def main():
                         elif 'internship' in resume_text:
                             cand_level = "Intermediate"
                         else:
+                            cand_level = "Fresher"
                             cand_level = "Fresher"
                         
                         st.session_state.user_step = 4
@@ -2252,6 +2922,7 @@ Generated by Resumate AI - AI Resume Analyzer
                 {"icon": "🎥", "title": "Video Learning", "desc": "Curated YouTube tutorials for your field"},
                 {"icon": "📄", "title": "Download PDF and Linkdin Profile Suggestions", "desc": "Download your resume and Linkdin Suggestions"},
                 {"icon": "📊", "title": "Detailed Feedback", "desc": "Section-wise analysis with improvement tips"},
+                {"icon": "🤖", "title": "AI Interview Analytics", "desc": "Advanced interview performance tracking and insights"},
                 {"icon": "📈", "title": "Analytics Dashboard", "desc": "Admin panel with user insights"}
             ]
             
@@ -3574,6 +4245,901 @@ Generated by Resumate AI - AI Resume Analyzer
                                     """, unsafe_allow_html=True)
                             else:
                                 st.error("❌ Unable to perform clustering analysis. Insufficient data or processing error.")
+                    
+                    # AI Interview Performance Analytics Section
+                    st.markdown("""
+                        <div style="
+                            background: linear-gradient(135deg, #1a1d29 0%, #2d313a 100%);
+                            padding: 2rem;
+                            border-radius: 20px;
+                            border: 2px solid #667eea;
+                            margin: 2rem 0;
+                            box-shadow: 0 15px 35px rgba(102, 126, 234, 0.2);
+                            text-align: center;
+                        ">
+                            <h2 style="
+                                color: #667eea; 
+                                font-size: 2.2rem; 
+                                margin-bottom: 1rem;
+                                font-weight: 700;
+                                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                            ">🤖 AI Interview Performance Analytics</h2>
+                            <p style="
+                                color: #b0b0b0; 
+                                font-size: 1.1rem;
+                                margin: 0;
+                            ">Advanced analytics dashboard for comprehensive interview insights</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Initialize session state for interview analysis
+                    if 'show_interview_analysis' not in st.session_state:
+                        st.session_state.show_interview_analysis = False
+                    if 'interview_analysis_data' not in st.session_state:
+                        st.session_state.interview_analysis_data = None
+                    
+                    # Button to start interview analysis
+                    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+                    with col_btn2:
+                        if not st.session_state.show_interview_analysis:
+                            if st.button(
+                                "🚀 Start Interview Analysis", 
+                                type="primary", 
+                                use_container_width=True,
+                                help="Click to analyze all interview performance data with interactive visualizations",
+                                key="start_interview_analysis_btn"
+                            ):
+                                st.session_state.show_interview_analysis = True
+                                st.rerun()
+                        else:
+                            col_refresh1, col_refresh2 = st.columns(2)
+                            with col_refresh1:
+                                if st.button(
+                                    "📊 Analysis Active", 
+                                    type="secondary", 
+                                    use_container_width=True,
+                                    disabled=True,
+                                    help="Interview analysis is currently displayed below"
+                                ):
+                                    pass
+                            with col_refresh2:
+                                if st.button(
+                                    "🔄 Refresh Analysis", 
+                                    type="primary", 
+                                    use_container_width=True,
+                                    help="Refresh interview analysis with latest data",
+                                    key="refresh_interview_analysis_btn"
+                                ):
+                                    st.session_state.interview_analysis_data = None
+                                    st.rerun()
+                    
+                    # Show interview analysis if button clicked
+                    if st.session_state.show_interview_analysis:
+                        try:
+                            interview_df = pd.read_csv(INTERVIEW_CSV)
+                            if len(interview_df) > 0:
+                                with st.spinner("🤖 Analyzing interview performance data..."):
+                                    st.info(f"🔍 Processing {len(interview_df)} interview records for comprehensive analysis...")
+                                    
+                                    # Store analysis data in session state
+                                    if st.session_state.interview_analysis_data is None:
+                                        st.session_state.interview_analysis_data = interview_df.copy()
+                                    
+                                    # Use cached data
+                                    interview_data = st.session_state.interview_analysis_data
+                                    
+                                    st.success("✅ Interview analysis completed successfully!")
+                                    
+                                    # Enhanced Interview Statistics Dashboard
+                                    st.markdown("""
+                                        <div style="
+                                            background: linear-gradient(135deg, #262730 0%, #1a1d24 100%);
+                                            padding: 1.5rem;
+                                            border-radius: 15px;
+                                            border: 2px solid #667eea;
+                                            margin: 1.5rem 0;
+                                            text-align: center;
+                                        ">
+                                            <h3 style="color: #667eea; margin: 0 0 1rem 0; font-size: 1.5rem;">📊 Performance Overview Dashboard</h3>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    col_int1, col_int2, col_int3, col_int4, col_int5 = st.columns(5)
+                                    
+                                    with col_int1:
+                                        total_interviews = len(interview_data)
+                                        st.markdown(f"""
+                                            <div style="
+                                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                                padding: 1.5rem;
+                                                border-radius: 15px;
+                                                color: white;
+                                                text-align: center;
+                                                box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+                                                transition: transform 0.3s ease;
+                                            ">
+                                                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🎯</div>
+                                                <div style="font-size: 2rem; font-weight: 700;">{total_interviews}</div>
+                                                <div style="font-size: 0.9rem; opacity: 0.9;">Total Interviews</div>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    with col_int2:
+                                        avg_interview_score = interview_data['overall_score'].mean()
+                                        score_color = '#00C48C' if avg_interview_score >= 80 else '#FFD700' if avg_interview_score >= 60 else '#FF4B4B'
+                                        st.markdown(f"""
+                                            <div style="
+                                                background: linear-gradient(135deg, {score_color} 0%, {score_color}AA 100%);
+                                                padding: 1.5rem;
+                                                border-radius: 15px;
+                                                color: white;
+                                                text-align: center;
+                                                box-shadow: 0 8px 20px {score_color}30;
+                                                transition: transform 0.3s ease;
+                                            ">
+                                                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⭐</div>
+                                                <div style="font-size: 2rem; font-weight: 700;">{avg_interview_score:.0f}</div>
+                                                <div style="font-size: 0.9rem; opacity: 0.9;">Average Score</div>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    with col_int3:
+                                        top_interview_field = interview_data['predicted_field'].mode()[0] if len(interview_data) > 0 else 'N/A'
+                                        st.markdown(f"""
+                                            <div style="
+                                                background: linear-gradient(135deg, #9C27B0 0%, #E91E63 100%);
+                                                padding: 1.5rem;
+                                                border-radius: 15px;
+                                                color: white;
+                                                text-align: center;
+                                                box-shadow: 0 8px 20px rgba(156, 39, 176, 0.3);
+                                                transition: transform 0.3s ease;
+                                            ">
+                                                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🏆</div>
+                                                <div style="font-size: 1.3rem; font-weight: 700; line-height: 1.2;">{top_interview_field}</div>
+                                                <div style="font-size: 0.9rem; opacity: 0.9;">Popular Field</div>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    with col_int4:
+                                        avg_time = interview_data['time_taken'].mean()
+                                        time_color = '#00C48C' if avg_time <= 15 else '#FFD700' if avg_time <= 25 else '#FF4B4B'
+                                        st.markdown(f"""
+                                            <div style="
+                                                background: linear-gradient(135deg, {time_color} 0%, {time_color}AA 100%);
+                                                padding: 1.5rem;
+                                                border-radius: 15px;
+                                                color: white;
+                                                text-align: center;
+                                                box-shadow: 0 8px 20px {time_color}30;
+                                                transition: transform 0.3s ease;
+                                            ">
+                                                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⏱️</div>
+                                                <div style="font-size: 2rem; font-weight: 700;">{avg_time:.1f}</div>
+                                                <div style="font-size: 0.9rem; opacity: 0.9;">Avg Time (min)</div>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    with col_int5:
+                                        success_rate = len(interview_data[interview_data['overall_score'] >= 70]) / len(interview_data) * 100
+                                        success_color = '#00C48C' if success_rate >= 70 else '#FFD700' if success_rate >= 50 else '#FF4B4B'
+                                        st.markdown(f"""
+                                            <div style="
+                                                background: linear-gradient(135deg, {success_color} 0%, {success_color}AA 100%);
+                                                padding: 1.5rem;
+                                                border-radius: 15px;
+                                                color: white;
+                                                text-align: center;
+                                                box-shadow: 0 8px 20px {success_color}30;
+                                                transition: transform 0.3s ease;
+                                            ">
+                                                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🎉</div>
+                                                <div style="font-size: 2rem; font-weight: 700;">{success_rate:.0f}%</div>
+                                                <div style="font-size: 0.9rem; opacity: 0.9;">Success Rate</div>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    st.markdown("<br>", unsafe_allow_html=True)
+                                    
+                                    # Interactive Visualization Dashboard
+                                    st.markdown("""
+                                        <div style="
+                                            background: linear-gradient(135deg, #1e2130 0%, #262b3d 100%);
+                                            padding: 2rem;
+                                            border-radius: 20px;
+                                            border: 2px solid #00C48C;
+                                            margin: 2rem 0;
+                                            box-shadow: 0 15px 35px rgba(0, 196, 140, 0.2);
+                                            text-align: center;
+                                        ">
+                                            <h2 style="
+                                                color: #00C48C; 
+                                                font-size: 2rem; 
+                                                margin-bottom: 1rem;
+                                                font-weight: 700;
+                                                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                                            ">📈 Interactive Performance Visualizations</h2>
+                                            <p style="
+                                                color: #b0b0b0; 
+                                                font-size: 1.1rem;
+                                                margin: 0;
+                                            ">Comprehensive charts and analytics for interview performance insights</p>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    # Row 1: Field Distribution and Difficulty Analysis
+                                    col_chart1, col_chart2 = st.columns(2, gap="large")
+                                    
+                                    with col_chart1:
+                                        # Enhanced Interview field distribution with 3D effect
+                                        field_counts = interview_data['predicted_field'].value_counts()
+                                        colors = ['#667eea', '#764ba2', '#FF4B4B', '#00C48C', '#FFD700', '#9C27B0', '#FF6B6B', '#4ECDC4']
+                                        
+                                        fig_fields = px.pie(
+                                            values=field_counts.values, 
+                                            names=field_counts.index,
+                                            title='<b style="color:#667eea; font-size:20px;">🎯 Interview Fields Distribution</b>',
+                                            color_discrete_sequence=colors,
+                                            hole=0.4  # Donut style
+                                        )
+                                        
+                                        fig_fields.update_traces(
+                                            textposition='auto',
+                                            textinfo='percent+label',
+                                            textfont=dict(size=12, family="Arial Black", color='white'),
+                                            marker=dict(
+                                                line=dict(color='#1a1d24', width=3)
+                                            ),
+                                            pull=[0.1 if i == 0 else 0.05 for i in range(len(field_counts))],
+                                            hovertemplate='<b style="color:#667eea;">%{label}</b><br>' +
+                                                         'Interviews: <b>%{value}</b><br>' +
+                                                         'Percentage: <b>%{percent}</b><br>' +
+                                                         '<extra></extra>',
+                                            rotation=45
+                                        )
+                                        
+                                        fig_fields.update_layout(
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            plot_bgcolor='rgba(0,0,0,0)',
+                                            font=dict(color='white', size=12, family='Arial'),
+                                            title_font=dict(size=18, color='#667eea', family='Arial Black'),
+                                            showlegend=True,
+                                            legend=dict(
+                                                orientation="v",
+                                                yanchor="middle",
+                                                y=0.5,
+                                                xanchor="left",
+                                                x=1.05,
+                                                bgcolor='rgba(30, 33, 48, 0.95)',
+                                                bordercolor='#667eea',
+                                                borderwidth=2,
+                                                font=dict(size=10, color='white')
+                                            ),
+                                            margin=dict(l=20, r=150, t=80, b=20),
+                                            height=450,
+                                            annotations=[
+                                                dict(
+                                                    text=f'<b style="color:#667eea; font-size:24px;">{len(field_counts)}</b><br>' +
+                                                         '<span style="color:#b0b0b0; font-size:12px;">Career Fields</span>',
+                                                    x=0.5, y=0.5,
+                                                    font_size=16,
+                                                    showarrow=False,
+                                                    font_color="white"
+                                                )
+                                            ]
+                                        )
+                                        
+                                        st.plotly_chart(fig_fields, use_container_width=True)
+                                    
+                                    with col_chart2:
+                                        # Enhanced 3D Difficulty level distribution
+                                        difficulty_counts = interview_data['difficulty_level'].value_counts()
+                                        difficulty_colors = ['#00C48C', '#FFD700', '#FF4B4B']  # Easy=Green, Medium=Yellow, Hard=Red
+                                        
+                                        fig_difficulty = px.bar(
+                                            x=difficulty_counts.index,
+                                            y=difficulty_counts.values,
+                                            title='<b style="color:#764ba2; font-size:20px;">📊 Difficulty Level Analysis</b>',
+                                            color=difficulty_counts.values,
+                                            color_continuous_scale=[[0, '#00C48C'], [0.5, '#FFD700'], [1, '#FF4B4B']],
+                                            text=difficulty_counts.values
+                                        )
+                                        
+                                        fig_difficulty.update_traces(
+                                            texttemplate='<b>%{text}</b>',
+                                            textposition='outside',
+                                            textfont=dict(size=16, color='white', family='Arial Black'),
+                                            marker=dict(
+                                                line=dict(color='#1a1d24', width=3),
+                                                opacity=0.9
+                                            ),
+                                            hovertemplate='<b>%{x} Level</b><br>' +
+                                                         'Interviews: <b>%{y}</b><br>' +
+                                                         '<extra></extra>'
+                                        )
+                                        
+                                        fig_difficulty.update_layout(
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            plot_bgcolor='rgba(30, 33, 48, 0.3)',
+                                            font=dict(color='white', size=13, family='Arial'),
+                                            title_font=dict(size=18, color='#764ba2', family='Arial Black'),
+                                            xaxis=dict(
+                                                title='<b style="color:#b0b0b0; font-size:14px;">Difficulty Level</b>',
+                                                gridcolor='rgba(255, 255, 255, 0.1)',
+                                                showgrid=False,
+                                                tickfont=dict(size=14, color='white', family='Arial Black')
+                                            ),
+                                            yaxis=dict(
+                                                title='<b style="color:#b0b0b0; font-size:14px;">Number of Interviews</b>',
+                                                gridcolor='rgba(255, 255, 255, 0.2)',
+                                                showgrid=True,
+                                                tickfont=dict(size=12, color='white')
+                                            ),
+                                            showlegend=False,
+                                            height=450,
+                                            bargap=0.4,
+                                            margin=dict(l=60, r=20, t=80, b=60)
+                                        )
+                                        
+                                        st.plotly_chart(fig_difficulty, use_container_width=True)
+                                    
+                                    # Row 2: Score Distribution and Time Analysis
+                                    col_chart3, col_chart4 = st.columns(2, gap="large")
+                                    
+                                    with col_chart3:
+                                        # Score distribution histogram with performance zones
+                                        fig_scores = px.histogram(
+                                            interview_data, 
+                                            x='overall_score', 
+                                            nbins=20,
+                                            title='<b style="color:#FF4B4B; font-size:20px;">🎯 Interview Score Distribution</b>',
+                                            labels={'overall_score': 'Interview Score', 'count': 'Number of Candidates'},
+                                            color_discrete_sequence=['#FF4B4B']
+                                        )
+                                        
+                                        fig_scores.update_traces(
+                                            marker=dict(
+                                                line=dict(color='#1a1d24', width=2),
+                                                opacity=0.8
+                                            ),
+                                            hovertemplate='<b>Score Range: %{x:.1f}</b><br>' +
+                                                         'Candidates: <b>%{y}</b><br>' +
+                                                         '<extra></extra>'
+                                        )
+                                        
+                                        fig_scores.update_layout(
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            plot_bgcolor='rgba(30, 33, 48, 0.3)',
+                                            font=dict(color='white', size=13, family='Arial'),
+                                            title_font=dict(size=18, color='#FF4B4B', family='Arial Black'),
+                                            showlegend=False,
+                                            xaxis=dict(
+                                                title='<b style="color:#b0b0b0; font-size:14px;">Interview Score (0-100)</b>',
+                                                gridcolor='rgba(255, 255, 255, 0.2)',
+                                                showgrid=True,
+                                                tickfont=dict(size=12, color='white'),
+                                                range=[-5, 105]
+                                            ),
+                                            yaxis=dict(
+                                                title='<b style="color:#b0b0b0; font-size:14px;">Number of Candidates</b>',
+                                                gridcolor='rgba(255, 255, 255, 0.2)',
+                                                showgrid=True,
+                                                tickfont=dict(size=12, color='white')
+                                            ),
+                                            bargap=0.1,
+                                            height=450,
+                                            margin=dict(l=60, r=60, t=80, b=60)
+                                        )
+                                        
+                                        # Add performance threshold lines
+                                        fig_scores.add_vline(x=90, line_dash="dash", line_color="#00C48C", line_width=3,
+                                                    annotation_text="🌟 Excellent (90+)", 
+                                                    annotation_position="top right",
+                                                    annotation_font=dict(color="#00C48C", size=11, family="Arial Black"))
+                                        
+                                        fig_scores.add_vline(x=70, line_dash="dash", line_color="#FFD700", line_width=3,
+                                                    annotation_text="🎯 Good (70+)", 
+                                                    annotation_position="top right",
+                                                    annotation_font=dict(color="#FFD700", size=11, family="Arial Black"))
+                                        
+                                        fig_scores.add_vline(x=50, line_dash="dash", line_color="#FF6B6B", line_width=3,
+                                                    annotation_text="⚠️ Needs Improvement", 
+                                                    annotation_position="top right",
+                                                    annotation_font=dict(color="#FF6B6B", size=11, family="Arial Black"))
+                                        
+                                        st.plotly_chart(fig_scores, use_container_width=True)
+                                    
+                                    with col_chart4:
+                                        # Time vs Score scatter plot with trend line
+                                        fig_time_score = px.scatter(
+                                            interview_data, 
+                                            x='time_taken', 
+                                            y='overall_score',
+                                            color='difficulty_level',
+                                            size='correct_answers',
+                                            title='<b style="color:#9C27B0; font-size:20px;">⏱️ Time vs Performance Analysis</b>',
+                                            labels={'time_taken': 'Time Taken (minutes)', 'overall_score': 'Interview Score'},
+                                            color_discrete_map={'Easy': '#00C48C', 'Medium': '#FFD700', 'Hard': '#FF4B4B'},
+                                            hover_data={'predicted_field': True, 'user_name': True}
+                                        )
+                                        
+                                        fig_time_score.update_traces(
+                                            marker=dict(
+                                                line=dict(color='#1a1d24', width=2),
+                                                opacity=0.8
+                                            ),
+                                            hovertemplate='<b>%{hovertext}</b><br>' +
+                                                         'Time: <b>%{x:.1f} min</b><br>' +
+                                                         'Score: <b>%{y:.1f}</b><br>' +
+                                                         'Difficulty: <b>%{color}</b><br>' +
+                                                         'Field: <b>%{customdata[0]}</b><br>' +
+                                                         '<extra></extra>',
+                                            hovertext=interview_data['user_name']
+                                        )
+                                        
+                                        # Add trend line
+                                        fig_time_score.add_scatter(
+                                            x=[interview_data['time_taken'].min(), interview_data['time_taken'].max()],
+                                            y=[np.polyval(np.polyfit(interview_data['time_taken'], interview_data['overall_score'], 1), 
+                                                          interview_data['time_taken'].min()),
+                                               np.polyval(np.polyfit(interview_data['time_taken'], interview_data['overall_score'], 1), 
+                                                          interview_data['time_taken'].max())],
+                                            mode='lines',
+                                            name='Trend Line',
+                                            line=dict(color='#FFFFFF', width=3, dash='dash'),
+                                            showlegend=False
+                                        )
+                                        
+                                        fig_time_score.update_layout(
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            plot_bgcolor='rgba(30, 33, 48, 0.3)',
+                                            font=dict(color='white', size=13, family='Arial'),
+                                            title_font=dict(size=18, color='#9C27B0', family='Arial Black'),
+                                            legend=dict(
+                                                bgcolor='rgba(30, 33, 48, 0.9)',
+                                                bordercolor='#9C27B0',
+                                                borderwidth=2,
+                                                font=dict(size=11, color='white'),
+                                                title_font=dict(size=12, color='#9C27B0')
+                                            ),
+                                            xaxis=dict(
+                                                title='<b style="color:#b0b0b0; font-size:14px;">Time Taken (minutes)</b>',
+                                                gridcolor='rgba(255, 255, 255, 0.2)',
+                                                showgrid=True,
+                                                tickfont=dict(size=12, color='white')
+                                            ),
+                                            yaxis=dict(
+                                                title='<b style="color:#b0b0b0; font-size:14px;">Interview Score</b>',
+                                                gridcolor='rgba(255, 255, 255, 0.2)',
+                                                showgrid=True,
+                                                tickfont=dict(size=12, color='white'),
+                                                range=[0, 105]
+                                            ),
+                                            height=450,
+                                            margin=dict(l=60, r=20, t=80, b=60)
+                                        )
+                                        
+                                        st.plotly_chart(fig_time_score, use_container_width=True)
+                                    
+                                    # Row 3: Performance by Field and Success Metrics
+                                    col_chart5, col_chart6 = st.columns(2, gap="large")
+                                    
+                                    with col_chart5:
+                                        # Average score by field with error bars
+                                        field_performance = interview_data.groupby('predicted_field').agg({
+                                            'overall_score': ['mean', 'std', 'count']
+                                        }).round(2)
+                                        field_performance.columns = ['mean_score', 'std_score', 'count']
+                                        field_performance = field_performance.reset_index().sort_values('mean_score', ascending=False)
+                                        
+                                        fig_field_perf = px.bar(
+                                            field_performance, 
+                                            x='mean_score', 
+                                            y='predicted_field',
+                                            orientation='h',
+                                            title='<b style="color:#00C48C; font-size:20px;">📈 Performance by Career Field</b>',
+                                            labels={'mean_score': 'Average Interview Score', 'predicted_field': 'Career Field'},
+                                            color='mean_score',
+                                            color_continuous_scale=[[0, '#FF4B4B'], [0.5, '#FFD700'], [1, '#00C48C']],
+                                            text='mean_score'
+                                        )
+                                        
+                                        fig_field_perf.update_traces(
+                                            texttemplate='<b>%{text:.1f}</b>',
+                                            textposition='outside',
+                                            textfont=dict(size=12, color='white', family='Arial Black'),
+                                            marker=dict(
+                                                line=dict(color='#1a1d24', width=2),
+                                                opacity=0.9
+                                            ),
+                                            hovertemplate='<b>%{y}</b><br>' +
+                                                         'Average Score: <b>%{x:.1f}</b><br>' +
+                                                         'Interviews: <b>%{customdata:.0f}</b><br>' +
+                                                         '<extra></extra>',
+                                            customdata=field_performance['count']
+                                        )
+                                        
+                                        fig_field_perf.update_layout(
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            plot_bgcolor='rgba(30, 33, 48, 0.3)',
+                                            font=dict(color='white', size=12, family='Arial'),
+                                            title_font=dict(size=18, color='#00C48C', family='Arial Black'),
+                                            showlegend=False,
+                                            height=450,
+                                            xaxis=dict(
+                                                title='<b style="color:#b0b0b0; font-size:14px;">Average Score (0-100)</b>',
+                                                gridcolor='rgba(255, 255, 255, 0.2)',
+                                                showgrid=True,
+                                                range=[0, 100],
+                                                tickfont=dict(size=12, color='white')
+                                            ),
+                                            yaxis=dict(
+                                                title='<b style="color:#b0b0b0; font-size:14px;">Career Fields</b>',
+                                                gridcolor='rgba(255, 255, 255, 0.1)',
+                                                tickfont=dict(size=11, color='white')
+                                            ),
+                                            margin=dict(l=120, r=60, t=80, b=60)
+                                        )
+                                        
+                                        st.plotly_chart(fig_field_perf, use_container_width=True)
+                                    
+                                    with col_chart6:
+                                        # Success rate donut chart by difficulty
+                                        success_by_difficulty = interview_data.groupby('difficulty_level').apply(
+                                            lambda x: (x['overall_score'] >= 70).sum() / len(x) * 100
+                                        ).reset_index()
+                                        success_by_difficulty.columns = ['difficulty_level', 'success_rate']
+                                        
+                                        fig_success = px.pie(
+                                            success_by_difficulty, 
+                                            values='success_rate', 
+                                            names='difficulty_level',
+                                            title='<b style="color:#FFD700; font-size:20px;">🏆 Success Rate by Difficulty</b>',
+                                            color_discrete_sequence=['#00C48C', '#FFD700', '#FF4B4B'],
+                                            hole=0.5
+                                        )
+                                        
+                                        fig_success.update_traces(
+                                            textposition='auto',
+                                            textinfo='percent+label',
+                                            textfont=dict(size=12, family="Arial Black", color='white'),
+                                            marker=dict(
+                                                line=dict(color='#1a1d24', width=3)
+                                            ),
+                                            pull=[0.05, 0.05, 0.05],
+                                            hovertemplate='<b>%{label} Level</b><br>' +
+                                                         'Success Rate: <b>%{value:.1f}%</b><br>' +
+                                                         '<extra></extra>'
+                                        )
+                                        
+                                        fig_success.update_layout(
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            plot_bgcolor='rgba(0,0,0,0)',
+                                            font=dict(color='white', size=12, family='Arial'),
+                                            title_font=dict(size=18, color='#FFD700', family='Arial Black'),
+                                            showlegend=True,
+                                            legend=dict(
+                                                orientation="h",
+                                                yanchor="top",
+                                                y=-0.1,
+                                                xanchor="center",
+                                                x=0.5,
+                                                bgcolor='rgba(30, 33, 48, 0.9)',
+                                                bordercolor='#FFD700',
+                                                borderwidth=2,
+                                                font=dict(size=11, color='white')
+                                            ),
+                                            margin=dict(l=20, r=20, t=80, b=80),
+                                            height=450,
+                                            annotations=[
+                                                dict(
+                                                    text=f'<b style="color:#FFD700; font-size:20px;">{success_rate:.0f}%</b><br>' +
+                                                         '<span style="color:#b0b0b0; font-size:12px;">Overall Success</span>',
+                                                    x=0.5, y=0.5,
+                                                    font_size=16,
+                                                    showarrow=False,
+                                                    font_color="white"
+                                                )
+                                            ]
+                                        )
+                                        
+                                        st.plotly_chart(fig_success, use_container_width=True)
+                                    
+                                    # Detailed Interview Data Section
+                                    st.markdown("""
+                                        <div style="
+                                            background: linear-gradient(135deg, #1e2130 0%, #262b3d 100%);
+                                            padding: 2rem;
+                                            border-radius: 20px;
+                                            border: 2px solid #FF4B4B;
+                                            margin: 2rem 0;
+                                            box-shadow: 0 15px 35px rgba(255, 75, 75, 0.2);
+                                            text-align: center;
+                                        ">
+                                            <h2 style="
+                                                color: #FF4B4B; 
+                                                font-size: 2rem; 
+                                                margin-bottom: 1rem;
+                                                font-weight: 700;
+                                                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                                            ">📋 Interview Sessions Database</h2>
+                                            <p style="
+                                                color: #b0b0b0; 
+                                                font-size: 1.1rem;
+                                                margin: 0;
+                                            ">Searchable database of all conducted interview sessions</p>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    # Enhanced Search functionality for interviews
+                                    col_search_int1, col_search_int2, col_search_int3 = st.columns([2, 1, 1])
+                                    
+                                    with col_search_int1:
+                                        search_interview_name = st.text_input(
+                                            "🔍 Search Interview by Name/Email", 
+                                            placeholder="Enter user name or email to search interviews...",
+                                            key="search_interview_name",
+                                            help="Search interviews by candidate name or email address"
+                                        )
+                                    
+                                    with col_search_int2:
+                                        search_interview_field = st.selectbox(
+                                            "🎯 Filter by Interview Field",
+                                            options=["All Fields"] + sorted(list(interview_data['predicted_field'].unique())),
+                                            key="filter_interview_field",
+                                            help="Filter interviews by career field"
+                                        )
+                                    
+                                    with col_search_int3:
+                                        search_interview_difficulty = st.selectbox(
+                                            "📊 Filter by Difficulty",
+                                            options=["All Levels"] + sorted(list(interview_data['difficulty_level'].unique())),
+                                            key="filter_interview_difficulty",
+                                            help="Filter interviews by difficulty level"
+                                        )
+                                    
+                                    # Apply enhanced filters for interviews
+                                    filtered_interview_df = interview_data.copy()
+                                    
+                                    # Search by name/email (case-insensitive)
+                                    if search_interview_name:
+                                        filtered_interview_df = filtered_interview_df[
+                                            filtered_interview_df['user_name'].str.contains(search_interview_name, case=False, na=False) |
+                                            filtered_interview_df['user_email'].str.contains(search_interview_name, case=False, na=False)
+                                        ]
+                                    
+                                    # Filter by field
+                                    if search_interview_field != "All Fields":
+                                        filtered_interview_df = filtered_interview_df[filtered_interview_df['predicted_field'] == search_interview_field]
+                                    
+                                    # Filter by difficulty
+                                    if search_interview_difficulty != "All Levels":
+                                        filtered_interview_df = filtered_interview_df[filtered_interview_df['difficulty_level'] == search_interview_difficulty]
+                                    
+                                    # Display search results info
+                                    if len(filtered_interview_df) != len(interview_data):
+                                        search_info = f"🔍 Showing {len(filtered_interview_df)} of {len(interview_data)} interviews"
+                                        if search_interview_name:
+                                            search_info += f" matching '{search_interview_name}'"
+                                        if search_interview_field != "All Fields":
+                                            search_info += f" in {search_interview_field}"
+                                        if search_interview_difficulty != "All Levels":
+                                            search_info += f" ({search_interview_difficulty} level)"
+                                        
+                                        st.success(search_info)
+                                    
+                                    # Enhanced data display with styling
+                                    if len(filtered_interview_df) > 0:
+                                        # Add performance indicators to the dataframe for display
+                                        display_df = filtered_interview_df.copy()
+                                        display_df['Performance'] = display_df['overall_score'].apply(
+                                            lambda x: '🌟 Excellent' if x >= 90 else '✅ Good' if x >= 70 else '⚠️ Needs Improvement'
+                                        )
+                                        display_df['Duration'] = display_df['time_taken'].apply(
+                                            lambda x: f"{x:.1f} min"
+                                        )
+                                        
+                                        # Select and reorder columns for better display
+                                        columns_to_show = ['user_name', 'user_email', 'predicted_field', 'difficulty_level', 
+                                                         'total_questions', 'correct_answers', 'overall_score', 'Performance', 
+                                                         'Duration', 'timestamp']
+                                        
+                                        # Rename columns for better readability
+                                        display_df = display_df[columns_to_show].rename(columns={
+                                            'user_name': 'Name',
+                                            'user_email': 'Email',
+                                            'predicted_field': 'Field',
+                                            'difficulty_level': 'Difficulty',
+                                            'total_questions': 'Questions',
+                                            'correct_answers': 'Correct',
+                                            'overall_score': 'Score',
+                                            'timestamp': 'Date'
+                                        })
+                                        
+                                        st.dataframe(
+                                            display_df, 
+                                            use_container_width=True,
+                                            height=400
+                                        )
+                                        
+                                        # Enhanced download options
+                                        col_download1, col_download2, col_download3 = st.columns([1, 1, 1])
+                                        
+                                        with col_download1:
+                                            # Download filtered data
+                                            csv_interview = filtered_interview_df.to_csv(index=False)
+                                            b64_interview = base64.b64encode(csv_interview.encode()).decode()
+                                            download_filename = "filtered_interview_data.csv" if len(filtered_interview_df) != len(interview_data) else "all_interview_data.csv"
+                                            href_interview = f'<a href="data:file/csv;base64,{b64_interview}" download="{download_filename}" style="color: #667eea; font-weight: 600; text-decoration: none; padding: 0.5rem 1rem; background: rgba(102, 126, 234, 0.2); border-radius: 8px; border: 1px solid #667eea;">📥 Download CSV ({len(filtered_interview_df)} records)</a>'
+                                            st.markdown(href_interview, unsafe_allow_html=True)
+                                        
+                                        with col_download2:
+                                            # Performance summary
+                                            avg_score = filtered_interview_df['overall_score'].mean()
+                                            success_rate = len(filtered_interview_df[filtered_interview_df['overall_score'] >= 70]) / len(filtered_interview_df) * 100
+                                            st.markdown(f"""
+                                                <div style="background: rgba(0, 196, 140, 0.1); padding: 1rem; border-radius: 8px; border-left: 4px solid #00C48C;">
+                                                    <p style="margin: 0; color: #00C48C; font-weight: 600;">📊 Selection Summary:</p>
+                                                    <p style="margin: 0.5rem 0 0 0; color: #b0b0b0; font-size: 0.9rem;">
+                                                        Avg Score: <span style="color: #00C48C; font-weight: 600;">{avg_score:.1f}</span><br>
+                                                        Success Rate: <span style="color: #00C48C; font-weight: 600;">{success_rate:.0f}%</span>
+                                                    </p>
+                                                </div>
+                                            """, unsafe_allow_html=True)
+                                        
+                                        with col_download3:
+                                            # Quick stats
+                                            top_performer = filtered_interview_df.loc[filtered_interview_df['overall_score'].idxmax()]
+                                            st.markdown(f"""
+                                                <div style="background: rgba(255, 215, 0, 0.1); padding: 1rem; border-radius: 8px; border-left: 4px solid #FFD700;">
+                                                    <p style="margin: 0; color: #FFD700; font-weight: 600;">🏆 Top Performer:</p>
+                                                    <p style="margin: 0.5rem 0 0 0; color: #b0b0b0; font-size: 0.9rem;">
+                                                        <span style="color: #FFD700; font-weight: 600;">{top_performer['user_name']}</span><br>
+                                                        Score: <span style="color: #FFD700; font-weight: 600;">{top_performer['overall_score']:.0f}</span>
+                                                    </p>
+                                                </div>
+                                            """, unsafe_allow_html=True)
+                                        
+                                    else:
+                                        st.markdown("""
+                                            <div style="background: rgba(255, 193, 7, 0.1); padding: 2rem; border-radius: 15px; border: 2px solid #FFC107; text-align: center;">
+                                                <h3 style="color: #FFC107; margin: 0 0 1rem 0;">❌ No Matching Interviews Found</h3>
+                                                <p style="color: #b0b0b0; margin: 0;">No interview data found matching your search criteria. Try adjusting your filters above.</p>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    # Interview insights section
+                                    if len(interview_data) > 0:
+                                        st.markdown("""
+                                            <div style="
+                                                background: linear-gradient(135deg, #262730 0%, #1a1d24 100%);
+                                                padding: 2rem;
+                                                border-radius: 15px;
+                                                border: 2px solid #9C27B0;
+                                                margin: 2rem 0;
+                                                text-align: center;
+                                            ">
+                                                <h3 style="color: #9C27B0; margin: 0 0 1rem 0; font-size: 1.5rem;">🔍 Key Insights</h3>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                        
+                                        col_insight1, col_insight2, col_insight3 = st.columns(3)
+                                        
+                                        with col_insight1:
+                                            # Most challenging field
+                                            field_difficulty = interview_data.groupby('predicted_field')['overall_score'].mean().sort_values()
+                                            most_challenging = field_difficulty.index[0]
+                                            most_challenging_score = field_difficulty.iloc[0]
+                                            
+                                            st.markdown(f"""
+                                                <div style="background: rgba(255, 75, 75, 0.1); padding: 1.5rem; border-radius: 12px; border-left: 5px solid #FF4B4B;">
+                                                    <h4 style="color: #FF4B4B; margin: 0 0 1rem 0;">🔥 Most Challenging Field</h4>
+                                                    <p style="color: #e0e0e0; margin: 0.5rem 0; font-size: 1.2rem; font-weight: 600;">{most_challenging}</p>
+                                                    <p style="color: #b0b0b0; margin: 0; font-size: 0.9rem;">Average Score: {most_challenging_score:.1f}</p>
+                                                </div>
+                                            """, unsafe_allow_html=True)
+                                        
+                                        with col_insight2:
+                                            # Fastest completion time
+                                            fastest_time = interview_data['time_taken'].min()
+                                            fastest_user = interview_data.loc[interview_data['time_taken'].idxmin(), 'user_name']
+                                            
+                                            st.markdown(f"""
+                                                <div style="background: rgba(0, 196, 140, 0.1); padding: 1.5rem; border-radius: 12px; border-left: 5px solid #00C48C;">
+                                                    <h4 style="color: #00C48C; margin: 0 0 1rem 0;">⚡ Fastest Completion</h4>
+                                                    <p style="color: #e0e0e0; margin: 0.5rem 0; font-size: 1.2rem; font-weight: 600;">{fastest_time:.1f} min</p>
+                                                    <p style="color: #b0b0b0; margin: 0; font-size: 0.9rem;">By: {fastest_user}</p>
+                                                </div>
+                                            """, unsafe_allow_html=True)
+                                        
+                                        with col_insight3:
+                                            # Most popular difficulty
+                                            popular_difficulty = interview_data['difficulty_level'].mode()[0]
+                                            difficulty_count = len(interview_data[interview_data['difficulty_level'] == popular_difficulty])
+                                            
+                                            st.markdown(f"""
+                                                <div style="background: rgba(255, 215, 0, 0.1); padding: 1.5rem; border-radius: 12px; border-left: 5px solid #FFD700;">
+                                                    <h4 style="color: #FFD700; margin: 0 0 1rem 0;">🎯 Popular Difficulty</h4>
+                                                    <p style="color: #e0e0e0; margin: 0.5rem 0; font-size: 1.2rem; font-weight: 600;">{popular_difficulty}</p>
+                                                    <p style="color: #b0b0b0; margin: 0; font-size: 0.9rem;">Chosen by: {difficulty_count} candidates</p>
+                                                </div>
+                                            """, unsafe_allow_html=True)
+                            
+                            else:
+                                st.markdown("""
+                                    <div style="
+                                        background: linear-gradient(135deg, #1a1d29 0%, #2d313a 100%);
+                                        padding: 3rem;
+                                        border-radius: 20px;
+                                        border: 2px solid #667eea;
+                                        margin: 2rem 0;
+                                        box-shadow: 0 15px 35px rgba(102, 126, 234, 0.2);
+                                        text-align: center;
+                                    ">
+                                        <h2 style="color: #667eea; font-size: 2.2rem; margin-bottom: 1rem; font-weight: 700;">📝 No Interview Data Available</h2>
+                                        <p style="color: #b0b0b0; font-size: 1.1rem; margin: 0 0 2rem 0;">No interview sessions have been conducted yet. Users need to take AI interviews first!</p>
+                                        <div style="background: rgba(102, 126, 234, 0.1); padding: 1.5rem; border-radius: 12px; border: 1px solid #667eea;">
+                                            <h4 style="color: #667eea; margin: 0 0 1rem 0;">💡 Getting Started:</h4>
+                                            <ul style="color: #b0b0b0; text-align: left; margin: 0; padding-left: 1.5rem;">
+                                                <li>Direct users to the "AI Interview Questions" section</li>
+                                                <li>Users can practice with AI-generated questions</li>
+                                                <li>Interview results will appear here automatically</li>
+                                                <li>Return here to view comprehensive analytics</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                        
+                        except Exception as e:
+                            st.markdown("""
+                                <div style="
+                                    background: linear-gradient(135deg, #1a1d29 0%, #2d313a 100%);
+                                    padding: 3rem;
+                                    border-radius: 20px;
+                                    border: 2px solid #FF4B4B;
+                                    margin: 2rem 0;
+                                    box-shadow: 0 15px 35px rgba(255, 75, 75, 0.2);
+                                    text-align: center;
+                                ">
+                                    <h2 style="color: #FF4B4B; font-size: 2.2rem; margin-bottom: 1rem; font-weight: 700;">⚠️ Interview Data Loading Error</h2>
+                                    <p style="color: #b0b0b0; font-size: 1.1rem; margin: 0 0 2rem 0;">Unable to load interview data. This might be because:</p>
+                                    <div style="background: rgba(255, 75, 75, 0.1); padding: 1.5rem; border-radius: 12px; border: 1px solid #FF4B4B;">
+                                        <ul style="color: #b0b0b0; text-align: left; margin: 0; padding-left: 1.5rem;">
+                                            <li>No interview data file exists yet</li>
+                                            <li>Interview CSV file is corrupted</li>
+                                            <li>First interview hasn't been completed</li>
+                                            <li>Database connection issue</li>
+                                        </ul>
+                                        <p style="color: #FF4B4B; margin: 1rem 0 0 0; font-weight: 600;">💡 Solution: Complete an AI interview first to generate data!</p>
+                                    </div>
+                                </div>
+                            """, unsafe_allow_html=True)
+                    
+                    else:
+                        st.markdown("""
+                            <div style="
+                                background: linear-gradient(135deg, #1a1d29 0%, #2d313a 100%);
+                                padding: 3rem;
+                                border-radius: 20px;
+                                border: 2px solid #667eea;
+                                margin: 2rem 0;
+                                box-shadow: 0 15px 35px rgba(102, 126, 234, 0.2);
+                                text-align: center;
+                            ">
+                                <h2 style="color: #667eea; font-size: 2.2rem; margin-bottom: 1rem; font-weight: 700;">🚀 Ready for Interview Analysis</h2>
+                                <p style="color: #b0b0b0; font-size: 1.1rem; margin: 0 0 2rem 0;">Click the "Start Interview Analysis" button above to begin comprehensive performance analytics!</p>
+                                <div style="background: rgba(102, 126, 234, 0.1); padding: 1.5rem; border-radius: 12px; border: 1px solid #667eea;">
+                                    <h4 style="color: #667eea; margin: 0 0 1rem 0;">✨ What You'll Get:</h4>
+                                    <ul style="color: #b0b0b0; text-align: left; margin: 0; padding-left: 1.5rem;">
+                                        <li>Interactive performance visualizations</li>
+                                        <li>Field-wise and difficulty-wise analytics</li>
+                                        <li>Success rate and time analysis</li>
+                                        <li>Comprehensive interview database</li>
+                                        <li>Downloadable reports and insights</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        """, unsafe_allow_html=True)
                     
                     # Feedback data
                     try:
