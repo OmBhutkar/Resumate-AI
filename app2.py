@@ -1149,45 +1149,47 @@ def get_cluster_insights(cluster_stats):
 def main():
     init_csv_files()
     
-    try:
-        logo_path = SCRIPT_DIR / 'Logo' / 'Resu.png'
-        img = Image.open(logo_path)
-        st.image(img)
-    except:
-        # Enhanced centered title with proper design
-        st.markdown("""
-            <div style="text-align: center; padding: 3rem 0; margin-bottom: 2rem;">
-                <h1 style="
-                    font-size: 3.5rem; 
-                    font-weight: 800; 
-                    background: linear-gradient(135deg, #FF4B4B 0%, #ff8080 50%, #00C48C 100%);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    background-clip: text;
-                    margin: 0;
-                    text-shadow: 0 4px 8px rgba(0,0,0,0.3);
-                    letter-spacing: 2px;
-                "> AI Resume Analyzer</h1>
-                <p style="
-                    font-size: 1.3rem; 
-                    color: #a0a0a0; 
-                    margin: 1rem 0 0 0;
-                    font-weight: 300;
-                    letter-spacing: 1px;
-                ">Transform Your Career with Intelligent Resume Analysis</p>
-                <div style="
-                    width: 100px; 
-                    height: 4px; 
-                    background: linear-gradient(135deg, #FF4B4B 0%, #00C48C 100%);
-                    margin: 1.5rem auto;
-                    border-radius: 2px;
-                "></div>
-            </div>
-        """, unsafe_allow_html=True)
-    
     st.sidebar.markdown("# Choose Something...")
     activities = ["User", "AI Interview Questions", "Feedback", "About", "Admin"]
     choice = st.sidebar.selectbox("Choose among the given options:", activities)
+    
+    # Show main header only if not in AI Interview Questions section
+    if choice != 'AI Interview Questions':
+        try:
+            logo_path = SCRIPT_DIR / 'Logo' / 'Resu.png'
+            img = Image.open(logo_path)
+            st.image(img)
+        except:
+            # Enhanced centered title with proper design
+            st.markdown("""
+                <div style="text-align: center; padding: 3rem 0; margin-bottom: 2rem;">
+                    <h1 style="
+                        font-size: 3.5rem; 
+                        font-weight: 800; 
+                        background: linear-gradient(135deg, #FF4B4B 0%, #ff8080 50%, #00C48C 100%);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        background-clip: text;
+                        margin: 0;
+                        text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                        letter-spacing: 2px;
+                    "> AI Resume Analyzer</h1>
+                    <p style="
+                        font-size: 1.3rem; 
+                        color: #a0a0a0; 
+                        margin: 1rem 0 0 0;
+                        font-weight: 300;
+                        letter-spacing: 1px;
+                    ">Transform Your Career with Intelligent Resume Analysis</p>
+                    <div style="
+                        width: 100px; 
+                        height: 4px; 
+                        background: linear-gradient(135deg, #FF4B4B 0%, #00C48C 100%);
+                        margin: 1.5rem auto;
+                        border-radius: 2px;
+                    "></div>
+                </div>
+            """, unsafe_allow_html=True)
     
     link = '<b>Built with 🤍 by <a href="" style="text-decoration: none; color: #FF4B4B;">Team Resumate AI</a></b>'
     st.sidebar.markdown(link, unsafe_allow_html=True)
@@ -1195,19 +1197,48 @@ def main():
 # ==================== AI Interview Questions Section ====================
     if choice == 'AI Interview Questions':
         st.markdown("""
-            <div style='text-align: center; padding: 2rem 0; margin-bottom: 2rem;'>
-                <h1 style='
-                    font-size: 3rem; 
-                    font-weight: 800; 
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    background-clip: text;
-                    margin: 0;
-                '> 🛰️ AI Interview Questions</h1>
-                <p style='font-size: 1.2rem; color: #a0a0a0; margin: 1rem 0 0 0;'>
-                    Practice with AI-Generated Role-Specific Questions
-                </p>
+            <div style='
+                background: linear-gradient(135deg, #FF4B4B 0%, #ff8080 50%, #00C48C 100%);
+                padding: 3rem 2rem;
+                margin: -1rem -1rem 2rem -1rem;
+                border-radius: 0;
+                text-align: center;
+                position: relative;
+                overflow: hidden;
+            '>
+                <div style='
+                    background: rgba(0,0,0,0.1);
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    z-index: 1;
+                '></div>
+                <div style='position: relative; z-index: 2;'>
+                    <h1 style='
+                        font-size: 3rem; 
+                        font-weight: 800; 
+                        color: white;
+                        margin: 0;
+                        text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                        letter-spacing: 2px;
+                    '> 🛰️ AI Interview Questions</h1>
+                    <p style='
+                        font-size: 1.2rem; 
+                        color: rgba(255,255,255,0.9); 
+                        margin: 1rem 0 0 0;
+                        font-weight: 300;
+                        letter-spacing: 1px;
+                    '>Practice with AI-Generated Role-Specific Questions</p>
+                    <div style="
+                        width: 100px; 
+                        height: 4px; 
+                        background: rgba(255,255,255,0.8);
+                        margin: 1.5rem auto 0 auto;
+                        border-radius: 2px;
+                    "></div>
+                </div>
             </div>
         """, unsafe_allow_html=True)
         
@@ -1235,10 +1266,8 @@ def main():
                     list(SKILL_CATEGORIES.keys()) + ["General IT"]
                 )
                 
-                difficulty_level = st.selectbox(
-                    "📊 Difficulty Level",
-                    ["Easy", "Medium", "Hard"]
-                )
+                # Set default difficulty level (removed user selection)
+                difficulty_level = "Medium"
             
             with col_config2:
                 num_questions = st.slider(
@@ -4467,121 +4496,66 @@ Generated by Resumate AI - AI Resume Analyzer
                                         </div>
                                     """, unsafe_allow_html=True)
                                     
-                                    # Row 1: Field Distribution and Difficulty Analysis
-                                    col_chart1, col_chart2 = st.columns(2, gap="large")
+                                    # Row 1: Career Field Distribution
+                                    # Enhanced Interview field distribution with 3D effect
+                                    field_counts = interview_data['predicted_field'].value_counts()
+                                    colors = ['#667eea', '#764ba2', '#FF4B4B', '#00C48C', '#FFD700', '#9C27B0', '#FF6B6B', '#4ECDC4']
                                     
-                                    with col_chart1:
-                                        # Enhanced Interview field distribution with 3D effect
-                                        field_counts = interview_data['predicted_field'].value_counts()
-                                        colors = ['#667eea', '#764ba2', '#FF4B4B', '#00C48C', '#FFD700', '#9C27B0', '#FF6B6B', '#4ECDC4']
-                                        
-                                        fig_fields = px.pie(
-                                            values=field_counts.values, 
-                                            names=field_counts.index,
-                                            title='<b style="color:#667eea; font-size:20px;">🎯 Interview Fields Distribution</b>',
-                                            color_discrete_sequence=colors,
-                                            hole=0.4  # Donut style
-                                        )
-                                        
-                                        fig_fields.update_traces(
-                                            textposition='auto',
-                                            textinfo='percent+label',
-                                            textfont=dict(size=12, family="Arial Black", color='white'),
-                                            marker=dict(
-                                                line=dict(color='#1a1d24', width=3)
-                                            ),
-                                            pull=[0.1 if i == 0 else 0.05 for i in range(len(field_counts))],
-                                            hovertemplate='<b style="color:#667eea;">%{label}</b><br>' +
-                                                         'Interviews: <b>%{value}</b><br>' +
-                                                         'Percentage: <b>%{percent}</b><br>' +
-                                                         '<extra></extra>',
-                                            rotation=45
-                                        )
-                                        
-                                        fig_fields.update_layout(
-                                            paper_bgcolor='rgba(0,0,0,0)',
-                                            plot_bgcolor='rgba(0,0,0,0)',
-                                            font=dict(color='white', size=12, family='Arial'),
-                                            title_font=dict(size=18, color='#667eea', family='Arial Black'),
-                                            showlegend=True,
-                                            legend=dict(
-                                                orientation="v",
-                                                yanchor="middle",
-                                                y=0.5,
-                                                xanchor="left",
-                                                x=1.05,
-                                                bgcolor='rgba(30, 33, 48, 0.95)',
-                                                bordercolor='#667eea',
-                                                borderwidth=2,
-                                                font=dict(size=10, color='white')
-                                            ),
-                                            margin=dict(l=20, r=150, t=80, b=20),
-                                            height=450,
-                                            annotations=[
-                                                dict(
-                                                    text=f'<b style="color:#667eea; font-size:24px;">{len(field_counts)}</b><br>' +
-                                                         '<span style="color:#b0b0b0; font-size:12px;">Career Fields</span>',
-                                                    x=0.5, y=0.5,
-                                                    font_size=16,
-                                                    showarrow=False,
-                                                    font_color="white"
-                                                )
-                                            ]
-                                        )
-                                        
-                                        st.plotly_chart(fig_fields, use_container_width=True)
+                                    fig_fields = px.pie(
+                                        values=field_counts.values, 
+                                        names=field_counts.index,
+                                        title='<b style="color:#667eea; font-size:20px;">🎯 Interview Fields Distribution</b>',
+                                        color_discrete_sequence=colors,
+                                        hole=0.4  # Donut style
+                                    )
                                     
-                                    with col_chart2:
-                                        # Enhanced 3D Difficulty level distribution
-                                        difficulty_counts = interview_data['difficulty_level'].value_counts()
-                                        difficulty_colors = ['#00C48C', '#FFD700', '#FF4B4B']  # Easy=Green, Medium=Yellow, Hard=Red
-                                        
-                                        fig_difficulty = px.bar(
-                                            x=difficulty_counts.index,
-                                            y=difficulty_counts.values,
-                                            title='<b style="color:#764ba2; font-size:20px;">📊 Difficulty Level Analysis</b>',
-                                            color=difficulty_counts.values,
-                                            color_continuous_scale=[[0, '#00C48C'], [0.5, '#FFD700'], [1, '#FF4B4B']],
-                                            text=difficulty_counts.values
-                                        )
-                                        
-                                        fig_difficulty.update_traces(
-                                            texttemplate='<b>%{text}</b>',
-                                            textposition='outside',
-                                            textfont=dict(size=16, color='white', family='Arial Black'),
-                                            marker=dict(
-                                                line=dict(color='#1a1d24', width=3),
-                                                opacity=0.9
-                                            ),
-                                            hovertemplate='<b>%{x} Level</b><br>' +
-                                                         'Interviews: <b>%{y}</b><br>' +
-                                                         '<extra></extra>'
-                                        )
-                                        
-                                        fig_difficulty.update_layout(
-                                            paper_bgcolor='rgba(0,0,0,0)',
-                                            plot_bgcolor='rgba(30, 33, 48, 0.3)',
-                                            font=dict(color='white', size=13, family='Arial'),
-                                            title_font=dict(size=18, color='#764ba2', family='Arial Black'),
-                                            xaxis=dict(
-                                                title='<b style="color:#b0b0b0; font-size:14px;">Difficulty Level</b>',
-                                                gridcolor='rgba(255, 255, 255, 0.1)',
-                                                showgrid=False,
-                                                tickfont=dict(size=14, color='white', family='Arial Black')
-                                            ),
-                                            yaxis=dict(
-                                                title='<b style="color:#b0b0b0; font-size:14px;">Number of Interviews</b>',
-                                                gridcolor='rgba(255, 255, 255, 0.2)',
-                                                showgrid=True,
-                                                tickfont=dict(size=12, color='white')
-                                            ),
-                                            showlegend=False,
-                                            height=450,
-                                            bargap=0.4,
-                                            margin=dict(l=60, r=20, t=80, b=60)
-                                        )
-                                        
-                                        st.plotly_chart(fig_difficulty, use_container_width=True)
+                                    fig_fields.update_traces(
+                                        textposition='auto',
+                                        textinfo='percent+label',
+                                        textfont=dict(size=12, family="Arial Black", color='white'),
+                                        marker=dict(
+                                            line=dict(color='#1a1d24', width=3)
+                                        ),
+                                        pull=[0.1 if i == 0 else 0.05 for i in range(len(field_counts))],
+                                        hovertemplate='<b style="color:#667eea;">%{label}</b><br>' +
+                                                     'Interviews: <b>%{value}</b><br>' +
+                                                     'Percentage: <b>%{percent}</b><br>' +
+                                                     '<extra></extra>',
+                                        rotation=45
+                                    )
+                                    
+                                    fig_fields.update_layout(
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(0,0,0,0)',
+                                        font=dict(color='white', size=12, family='Arial'),
+                                        title_font=dict(size=18, color='#667eea', family='Arial Black'),
+                                        showlegend=True,
+                                        legend=dict(
+                                            orientation="v",
+                                            yanchor="middle",
+                                            y=0.5,
+                                            xanchor="left",
+                                            x=1.05,
+                                            bgcolor='rgba(30, 33, 48, 0.95)',
+                                            bordercolor='#667eea',
+                                            borderwidth=2,
+                                            font=dict(size=10, color='white')
+                                        ),
+                                        margin=dict(l=20, r=150, t=80, b=20),
+                                        height=450,
+                                        annotations=[
+                                            dict(
+                                                text=f'<b style="color:#667eea; font-size:24px;">{len(field_counts)}</b><br>' +
+                                                     '<span style="color:#b0b0b0; font-size:12px;">Career Fields</span>',
+                                                x=0.5, y=0.5,
+                                                font_size=16,
+                                                showarrow=False,
+                                                font_color="white"
+                                            )
+                                        ]
+                                    )
+                                    
+                                    st.plotly_chart(fig_fields, use_container_width=True)
                                     
                                     # Row 2: Score Distribution and Time Analysis
                                     col_chart3, col_chart4 = st.columns(2, gap="large")
@@ -4655,11 +4629,10 @@ Generated by Resumate AI - AI Resume Analyzer
                                             interview_data, 
                                             x='time_taken', 
                                             y='overall_score',
-                                            color='difficulty_level',
+                                            color='predicted_field',
                                             size='correct_answers',
                                             title='<b style="color:#9C27B0; font-size:20px;">⏱️ Time vs Performance Analysis</b>',
                                             labels={'time_taken': 'Time Taken (minutes)', 'overall_score': 'Interview Score'},
-                                            color_discrete_map={'Easy': '#00C48C', 'Medium': '#FFD700', 'Hard': '#FF4B4B'},
                                             hover_data={'predicted_field': True, 'user_name': True}
                                         )
                                         
@@ -4671,7 +4644,6 @@ Generated by Resumate AI - AI Resume Analyzer
                                             hovertemplate='<b>%{hovertext}</b><br>' +
                                                          'Time: <b>%{x:.1f} min</b><br>' +
                                                          'Score: <b>%{y:.1f}</b><br>' +
-                                                         'Difficulty: <b>%{color}</b><br>' +
                                                          'Field: <b>%{customdata[0]}</b><br>' +
                                                          '<extra></extra>',
                                             hovertext=interview_data['user_name']
@@ -4721,129 +4693,64 @@ Generated by Resumate AI - AI Resume Analyzer
                                         
                                         st.plotly_chart(fig_time_score, use_container_width=True)
                                     
-                                    # Row 3: Performance by Field and Success Metrics
-                                    col_chart5, col_chart6 = st.columns(2, gap="large")
+                                    # Row 3: Performance by Career Field
+                                    # Average score by field with error bars
+                                    field_performance = interview_data.groupby('predicted_field').agg({
+                                        'overall_score': ['mean', 'std', 'count']
+                                    }).round(2)
+                                    field_performance.columns = ['mean_score', 'std_score', 'count']
+                                    field_performance = field_performance.reset_index().sort_values('mean_score', ascending=False)
                                     
-                                    with col_chart5:
-                                        # Average score by field with error bars
-                                        field_performance = interview_data.groupby('predicted_field').agg({
-                                            'overall_score': ['mean', 'std', 'count']
-                                        }).round(2)
-                                        field_performance.columns = ['mean_score', 'std_score', 'count']
-                                        field_performance = field_performance.reset_index().sort_values('mean_score', ascending=False)
-                                        
-                                        fig_field_perf = px.bar(
-                                            field_performance, 
-                                            x='mean_score', 
-                                            y='predicted_field',
-                                            orientation='h',
-                                            title='<b style="color:#00C48C; font-size:20px;">📈 Performance by Career Field</b>',
-                                            labels={'mean_score': 'Average Interview Score', 'predicted_field': 'Career Field'},
-                                            color='mean_score',
-                                            color_continuous_scale=[[0, '#FF4B4B'], [0.5, '#FFD700'], [1, '#00C48C']],
-                                            text='mean_score'
-                                        )
-                                        
-                                        fig_field_perf.update_traces(
-                                            texttemplate='<b>%{text:.1f}</b>',
-                                            textposition='outside',
-                                            textfont=dict(size=12, color='white', family='Arial Black'),
-                                            marker=dict(
-                                                line=dict(color='#1a1d24', width=2),
-                                                opacity=0.9
-                                            ),
-                                            hovertemplate='<b>%{y}</b><br>' +
-                                                         'Average Score: <b>%{x:.1f}</b><br>' +
-                                                         'Interviews: <b>%{customdata:.0f}</b><br>' +
-                                                         '<extra></extra>',
-                                            customdata=field_performance['count']
-                                        )
-                                        
-                                        fig_field_perf.update_layout(
-                                            paper_bgcolor='rgba(0,0,0,0)',
-                                            plot_bgcolor='rgba(30, 33, 48, 0.3)',
-                                            font=dict(color='white', size=12, family='Arial'),
-                                            title_font=dict(size=18, color='#00C48C', family='Arial Black'),
-                                            showlegend=False,
-                                            height=450,
-                                            xaxis=dict(
-                                                title='<b style="color:#b0b0b0; font-size:14px;">Average Score (0-100)</b>',
-                                                gridcolor='rgba(255, 255, 255, 0.2)',
-                                                showgrid=True,
-                                                range=[0, 100],
-                                                tickfont=dict(size=12, color='white')
-                                            ),
-                                            yaxis=dict(
-                                                title='<b style="color:#b0b0b0; font-size:14px;">Career Fields</b>',
-                                                gridcolor='rgba(255, 255, 255, 0.1)',
-                                                tickfont=dict(size=11, color='white')
-                                            ),
-                                            margin=dict(l=120, r=60, t=80, b=60)
-                                        )
-                                        
-                                        st.plotly_chart(fig_field_perf, use_container_width=True)
+                                    fig_field_perf = px.bar(
+                                        field_performance, 
+                                        x='mean_score', 
+                                        y='predicted_field',
+                                        orientation='h',
+                                        title='<b style="color:#00C48C; font-size:20px;">📈 Performance by Career Field</b>',
+                                        labels={'mean_score': 'Average Interview Score', 'predicted_field': 'Career Field'},
+                                        color='mean_score',
+                                        color_continuous_scale=[[0, '#FF4B4B'], [0.5, '#FFD700'], [1, '#00C48C']],
+                                        text='mean_score'
+                                    )
                                     
-                                    with col_chart6:
-                                        # Success rate donut chart by difficulty
-                                        success_by_difficulty = interview_data.groupby('difficulty_level').apply(
-                                            lambda x: (x['overall_score'] >= 70).sum() / len(x) * 100
-                                        ).reset_index()
-                                        success_by_difficulty.columns = ['difficulty_level', 'success_rate']
-                                        
-                                        fig_success = px.pie(
-                                            success_by_difficulty, 
-                                            values='success_rate', 
-                                            names='difficulty_level',
-                                            title='<b style="color:#FFD700; font-size:20px;">🏆 Success Rate by Difficulty</b>',
-                                            color_discrete_sequence=['#00C48C', '#FFD700', '#FF4B4B'],
-                                            hole=0.5
-                                        )
-                                        
-                                        fig_success.update_traces(
-                                            textposition='auto',
-                                            textinfo='percent+label',
-                                            textfont=dict(size=12, family="Arial Black", color='white'),
-                                            marker=dict(
-                                                line=dict(color='#1a1d24', width=3)
-                                            ),
-                                            pull=[0.05, 0.05, 0.05],
-                                            hovertemplate='<b>%{label} Level</b><br>' +
-                                                         'Success Rate: <b>%{value:.1f}%</b><br>' +
-                                                         '<extra></extra>'
-                                        )
-                                        
-                                        fig_success.update_layout(
-                                            paper_bgcolor='rgba(0,0,0,0)',
-                                            plot_bgcolor='rgba(0,0,0,0)',
-                                            font=dict(color='white', size=12, family='Arial'),
-                                            title_font=dict(size=18, color='#FFD700', family='Arial Black'),
-                                            showlegend=True,
-                                            legend=dict(
-                                                orientation="h",
-                                                yanchor="top",
-                                                y=-0.1,
-                                                xanchor="center",
-                                                x=0.5,
-                                                bgcolor='rgba(30, 33, 48, 0.9)',
-                                                bordercolor='#FFD700',
-                                                borderwidth=2,
-                                                font=dict(size=11, color='white')
-                                            ),
-                                            margin=dict(l=20, r=20, t=80, b=80),
-                                            height=450,
-                                            annotations=[
-                                                dict(
-                                                    text=f'<b style="color:#FFD700; font-size:20px;">{success_rate:.0f}%</b><br>' +
-                                                         '<span style="color:#b0b0b0; font-size:12px;">Overall Success</span>',
-                                                    x=0.5, y=0.5,
-                                                    font_size=16,
-                                                    showarrow=False,
-                                                    font_color="white"
-                                                )
-                                            ]
-                                        )
-                                        
-                                        st.plotly_chart(fig_success, use_container_width=True)
+                                    fig_field_perf.update_traces(
+                                        texttemplate='<b>%{text:.1f}</b>',
+                                        textposition='outside',
+                                        textfont=dict(size=12, color='white', family='Arial Black'),
+                                        marker=dict(
+                                            line=dict(color='#1a1d24', width=2),
+                                            opacity=0.9
+                                        ),
+                                        hovertemplate='<b>%{y}</b><br>' +
+                                                     'Average Score: <b>%{x:.1f}</b><br>' +
+                                                     'Interviews: <b>%{customdata:.0f}</b><br>' +
+                                                     '<extra></extra>',
+                                        customdata=field_performance['count']
+                                    )
+                                    
+                                    fig_field_perf.update_layout(
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(30, 33, 48, 0.3)',
+                                        font=dict(color='white', size=12, family='Arial'),
+                                        title_font=dict(size=18, color='#00C48C', family='Arial Black'),
+                                        showlegend=False,
+                                        height=450,
+                                        xaxis=dict(
+                                            title='<b style="color:#b0b0b0; font-size:14px;">Average Score (0-100)</b>',
+                                            gridcolor='rgba(255, 255, 255, 0.2)',
+                                            showgrid=True,
+                                            range=[0, 100],
+                                            tickfont=dict(size=12, color='white')
+                                        ),
+                                        yaxis=dict(
+                                            title='<b style="color:#b0b0b0; font-size:14px;">Career Fields</b>',
+                                            gridcolor='rgba(255, 255, 255, 0.1)',
+                                            tickfont=dict(size=11, color='white')
+                                        ),
+                                        margin=dict(l=120, r=60, t=80, b=60)
+                                    )
+                                    
+                                    st.plotly_chart(fig_field_perf, use_container_width=True)
                                     
                                     # Detailed Interview Data Section
                                     st.markdown("""
@@ -4872,7 +4779,7 @@ Generated by Resumate AI - AI Resume Analyzer
                                     """, unsafe_allow_html=True)
                                     
                                     # Enhanced Search functionality for interviews
-                                    col_search_int1, col_search_int2, col_search_int3 = st.columns([2, 1, 1])
+                                    col_search_int1, col_search_int2 = st.columns([3, 1])
                                     
                                     with col_search_int1:
                                         search_interview_name = st.text_input(
@@ -4890,14 +4797,6 @@ Generated by Resumate AI - AI Resume Analyzer
                                             help="Filter interviews by career field"
                                         )
                                     
-                                    with col_search_int3:
-                                        search_interview_difficulty = st.selectbox(
-                                            "📊 Filter by Difficulty",
-                                            options=["All Levels"] + sorted(list(interview_data['difficulty_level'].unique())),
-                                            key="filter_interview_difficulty",
-                                            help="Filter interviews by difficulty level"
-                                        )
-                                    
                                     # Apply enhanced filters for interviews
                                     filtered_interview_df = interview_data.copy()
                                     
@@ -4912,10 +4811,6 @@ Generated by Resumate AI - AI Resume Analyzer
                                     if search_interview_field != "All Fields":
                                         filtered_interview_df = filtered_interview_df[filtered_interview_df['predicted_field'] == search_interview_field]
                                     
-                                    # Filter by difficulty
-                                    if search_interview_difficulty != "All Levels":
-                                        filtered_interview_df = filtered_interview_df[filtered_interview_df['difficulty_level'] == search_interview_difficulty]
-                                    
                                     # Display search results info
                                     if len(filtered_interview_df) != len(interview_data):
                                         search_info = f"🔍 Showing {len(filtered_interview_df)} of {len(interview_data)} interviews"
@@ -4923,8 +4818,6 @@ Generated by Resumate AI - AI Resume Analyzer
                                             search_info += f" matching '{search_interview_name}'"
                                         if search_interview_field != "All Fields":
                                             search_info += f" in {search_interview_field}"
-                                        if search_interview_difficulty != "All Levels":
-                                            search_info += f" ({search_interview_difficulty} level)"
                                         
                                         st.success(search_info)
                                     
@@ -4940,7 +4833,7 @@ Generated by Resumate AI - AI Resume Analyzer
                                         )
                                         
                                         # Select and reorder columns for better display
-                                        columns_to_show = ['user_name', 'user_email', 'predicted_field', 'difficulty_level', 
+                                        columns_to_show = ['user_name', 'user_email', 'predicted_field', 
                                                          'total_questions', 'correct_answers', 'overall_score', 'Performance', 
                                                          'Duration', 'timestamp']
                                         
@@ -4949,7 +4842,6 @@ Generated by Resumate AI - AI Resume Analyzer
                                             'user_name': 'Name',
                                             'user_email': 'Email',
                                             'predicted_field': 'Field',
-                                            'difficulty_level': 'Difficulty',
                                             'total_questions': 'Questions',
                                             'correct_answers': 'Correct',
                                             'overall_score': 'Score',
@@ -5023,7 +4915,7 @@ Generated by Resumate AI - AI Resume Analyzer
                                             </div>
                                         """, unsafe_allow_html=True)
                                         
-                                        col_insight1, col_insight2, col_insight3 = st.columns(3)
+                                        col_insight1, col_insight2 = st.columns(2)
                                         
                                         with col_insight1:
                                             # Most challenging field
@@ -5049,19 +4941,6 @@ Generated by Resumate AI - AI Resume Analyzer
                                                     <h4 style="color: #00C48C; margin: 0 0 1rem 0;">⚡ Fastest Completion</h4>
                                                     <p style="color: #e0e0e0; margin: 0.5rem 0; font-size: 1.2rem; font-weight: 600;">{fastest_time:.1f} min</p>
                                                     <p style="color: #b0b0b0; margin: 0; font-size: 0.9rem;">By: {fastest_user}</p>
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                        
-                                        with col_insight3:
-                                            # Most popular difficulty
-                                            popular_difficulty = interview_data['difficulty_level'].mode()[0]
-                                            difficulty_count = len(interview_data[interview_data['difficulty_level'] == popular_difficulty])
-                                            
-                                            st.markdown(f"""
-                                                <div style="background: rgba(255, 215, 0, 0.1); padding: 1.5rem; border-radius: 12px; border-left: 5px solid #FFD700;">
-                                                    <h4 style="color: #FFD700; margin: 0 0 1rem 0;">🎯 Popular Difficulty</h4>
-                                                    <p style="color: #e0e0e0; margin: 0.5rem 0; font-size: 1.2rem; font-weight: 600;">{popular_difficulty}</p>
-                                                    <p style="color: #b0b0b0; margin: 0; font-size: 0.9rem;">Chosen by: {difficulty_count} candidates</p>
                                                 </div>
                                             """, unsafe_allow_html=True)
                             
